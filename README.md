@@ -1,18 +1,35 @@
-# ODYSSEY | Real-Time ISL Avatar
+# Indian Sign Language Interpreter
 
-> Speech or text to validated Indian Sign Language pose playback on a custom 3D avatar.
+> A browser-based interpreter prototype that turns supported speech or text into validated Indian Sign Language pose playback on a custom 3D avatar.
 
 [![Runtime](https://img.shields.io/badge/runtime-static%20web%20app-0f766e)](https://mathewsvm-isl-avatar-mvp.static.hf.space/index.html?v=mobile-core-14)
 [![Languages](https://img.shields.io/badge/input-English%20%7C%20Hindi%20%7C%20Malayalam%20%7C%20Tamil-1d4ed8)](#language-support)
 [![Status](https://img.shields.io/badge/status-MVP-f59e0b)](#product-boundary)
 
-**ODYSSEY** is a browser-based Indian Sign Language (ISL) demonstration built by **Team Odyssey**. A user can type a phrase or use speech input; the application normalizes the input, resolves only validated signs or reviewed phrases, and plays the corresponding stored pose clips through a 3D avatar.
+The **Indian Sign Language Interpreter** is a browser-based ISL demonstration developed by **Team Odyssey**. A user can type a phrase or use speech input; the application normalizes the input, resolves only validated signs or reviewed phrases, and plays the corresponding stored pose clips through a 3D avatar.
 
 ## Live Demo
 
-**[Launch ODYSSEY ISL MVP](https://mathewsvm-isl-avatar-mvp.static.hf.space/index.html?v=mobile-core-14)**
+**[Launch the Indian Sign Language Interpreter](https://mathewsvm-isl-avatar-mvp.static.hf.space/index.html?v=mobile-core-14)**
 
 For the best mobile experience, allow the first page visit to finish loading. The app then caches its core runtime so later visits are substantially faster.
+
+## The Problem
+
+Everyday conversations, classroom explanations, and online meetings move quickly. Deaf and hard-of-hearing participants may face a communication gap when an interpreter is unavailable, especially for short, repeated interaction patterns such as greetings, requests for clarification, meeting instructions, and common conversational phrases.
+
+Many demonstration systems fail in two ways: they show a default animation for unknown input, or they overstate what a small dictionary can translate. Both problems reduce trust. A credible prototype must be transparent about what it understands, respond quickly to known input, and refuse unsupported input clearly.
+
+## Our Solution
+
+The Indian Sign Language Interpreter uses a **guarded retrieval pipeline** rather than inventing gestures for unsupported text. Its design objective is simple: only show a sign when the runtime has a validated record for it.
+
+1. Capture typed text or browser speech transcription.
+2. Normalize harmless spelling, punctuation, contraction, and greeting variants.
+3. Match reviewed phrases first, then resolve the longest available validated sign labels.
+4. Retrieve the stored pose clip associated with each resolved label.
+5. Retarget the pose sequence to the browser avatar and animate it at the selected speed.
+6. Stop with a clear unavailable state when content is not covered, rather than guessing.
 
 ## What It Does
 
@@ -50,6 +67,57 @@ The system deliberately separates **lookup** from **animation**. It only animate
 | Avatar clip format | One selected 30-frame pose clip per resolved entry |
 | Input languages | English, Hindi, Malayalam, Tamil |
 | Unknown content | Explicitly reported; no fallback sign is played |
+
+## Engineering Architecture
+
+The application is designed as a lightweight browser experience with an auditable sign-selection layer.
+
+| Layer | Responsibility | Implementation |
+| --- | --- | --- |
+| Interaction | Text entry, microphone control, language selector, speed control | Responsive HTML, CSS, and browser APIs |
+| Language guard | Normalization, phrase matching, unknown-input rejection | Deterministic JavaScript and Python rules |
+| Sign index | Maps reviewed labels to validated clip metadata | 11,033-entry runtime index |
+| Pose delivery | Loads only the required clips instead of the full corpus | Lazy-loaded JSON pose assets |
+| Avatar renderer | Converts landmark poses to arm, wrist, palm, and finger movement | Custom 3D browser rig |
+| Repeat-visit cache | Keeps the application shell and core signs available after first visit | Service worker plus compact bootstrap runtime |
+
+### Mobile performance strategy
+
+The deployed browser app avoids loading the entire pose corpus on every visit:
+
+- A **4.85 MB bootstrap runtime** contains the full index plus 25 high-frequency signs.
+- A deferred **8.99 MB quick-start cache** adds 68 reviewed demonstration signs.
+- The remaining pose clips are fetched only when a resolved sign requires them.
+- The service worker caches the application shell and bootstrap runtime after the first successful visit.
+
+This makes common repeat interactions noticeably faster while keeping the overall runtime data separate from the Git repository.
+
+## Verification and Benchmarks
+
+The following figures are **reproducible engineering checks**, not a claim of linguistic accuracy. They measure whether a covered input resolves to the intended stored record and whether that record can be delivered to the avatar pipeline.
+
+| Evaluation | Result | What it verifies |
+| --- | --- | --- |
+| English acceptance suite | **25 / 25 passed (100%)** | Reviewed English phrases resolved to retrievable stored clips |
+| Reviewed Hindi, Malayalam, and Tamil suite | **60 / 60 passed (100%)** | Reviewed regional phrases mapped to their intended English/ISL lookup paths |
+| Input-normalization regression | **16 / 16 passed (100%)** | Common speech-like spelling, contractions, and greeting variants resolve consistently |
+| Multilingual mapping regression | **10 / 10 passed (100%)** | Representative reviewed language mappings produce the expected English phrase |
+| Static runtime contract | **11,033 indexed records** | Browser runtime index, bootstrap payload, and deployment assets remain consistent |
+| Quick-start clip integrity | **68 cached clips** | Every cached clip contains a non-empty 30-frame pose sequence |
+| Core bootstrap integrity | **25 cached signs** | Core cache can provide a first responsive interaction path |
+
+### Quality controls
+
+- Each accepted pose clip is checked for the expected landmark-array structure before release checks pass.
+- The source-quality gate rejects a label when its best stored take has both hands collapsed for more than half its frames.
+- Five CISLR labels and five iSign labels were excluded by this quality gate in the local candidate inventory.
+- The ISL500 supplemental source is not used for serving because its audit found collapsed hands in 9,436 of 14,220 frames.
+- Browser smoke checks cover front view, arm motion, hand pose, playback speed, lazy clip loading, and debug-rig output.
+- Unknown words remain visible as unavailable instead of silently triggering a different sign.
+
+### Interpreting the numbers correctly
+
+The 100% values above mean the system successfully retrieved and delivered clips for the **fixed reviewed test suites**. They do **not** establish 100% ISL semantic correctness, signer intelligibility, general sentence translation accuracy, or coverage of arbitrary vocabulary. Those require an independently labelled test set and evaluation by qualified ISL signers.
 
 ## Try These Inputs
 
@@ -144,7 +212,7 @@ This keeps the GitHub repository compact and reproducible while preventing accid
 
 ## Product Boundary
 
-ODYSSEY is a **validated lookup and recorded-pose MVP**. It is not a claim of:
+The Indian Sign Language Interpreter is a **validated lookup and recorded-pose MVP**. It is not a claim of:
 
 - universal vocabulary coverage;
 - unrestricted English, Hindi, Malayalam, or Tamil to ISL translation;
