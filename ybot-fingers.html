@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Y Bot ISL Avatar — Fingers</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/FBXLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<style>
+ :root{--bg:#0d1b1e;--panel:#12262b;--ink:#eaf2f0;--muted:#8fa8a4;--accent:#f2a541;--ok:#4fb286;--miss:#d9694f;}
+ *{box-sizing:border-box}
+ body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:18px 16px 40px}
+ .wrap{max-width:860px;margin:0 auto}
+ h1{font-size:1.3rem;margin:0 0 4px}
+ .sub{color:var(--muted);font-size:.88rem;margin-bottom:14px}
+ .panel{background:var(--panel);border-radius:10px;padding:14px 16px;margin-bottom:12px}
+ label{font-size:.8rem;color:var(--muted)}
+ input[type=file],input[type=text],select{background:#1c3a38;color:var(--ink);border:none;border-radius:6px;padding:9px 10px;font:inherit}
+ .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+ button{font:inherit;font-weight:600;border:none;border-radius:8px;padding:10px 18px;cursor:pointer;background:var(--accent);color:#1a1206}
+ button:disabled{background:#33403f;color:var(--muted);cursor:not-allowed}
+ button.sec{background:#1c3a38;color:var(--ink)}
+ #holder{width:100%;height:540px;border-radius:10px;overflow:hidden;background:#0a1618;border:1px solid #1c3a38}
+ .status{font-size:.8rem;color:var(--muted);margin-top:8px}
+ .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+ .chip{padding:5px 11px;border-radius:999px;font-size:.82rem;font-weight:600;background:#1c3a38}
+ .chip.matched{background:var(--ok);color:#06231a}
+ .chip.playing{background:var(--accent);color:#1a1206}
+ .chip.unmatched{background:#3a2420;color:var(--miss);border:1px solid var(--miss)}
+ #boneLog{font-family:ui-monospace,Consolas,monospace;font-size:.72rem;color:var(--muted);max-height:150px;overflow:auto;margin-top:8px;white-space:pre-wrap;background:#0a1618;padding:8px;border-radius:6px}
+ .slider{display:flex;align-items:center;gap:8px;font-size:.8rem;color:var(--muted)}
+ .note{font-size:.78rem;color:var(--muted);border-top:1px solid #1c3a38;padding-top:12px;margin-top:16px}
+</style>
+</head>
+<body>
+<div class="wrap">
+ <h1>Y Bot ISL Avatar — with finger articulation</h1>
+ <div class="sub">Diagnostics confirmed 95% of sign difference lives in the hands. This build drives finger bones.</div>
+
+ <div class="panel">
+  <div class="row">
+   <div><label>1. Y Bot .fbx</label><br><input type="file" id="fbx" accept=".fbx"></div>
+   <div><label>2. signal_dictionary_fixed.json</label><br><input type="file" id="json" accept=".json"></div>
+   <button class="sec" id="dumpBtn" disabled>List all bones</button>
+  </div>
+  <div class="status" id="loadStatus">Load both files.</div>
+  <div id="boneLog"></div>
+ </div>
+
+ <div class="panel">
+  <div class="row">
+   <select id="wordSel"><option>(load dictionary)</option></select>
+   <input type="text" id="txt" placeholder="or type: hello please help" style="flex:1;min-width:170px">
+   <button id="play" disabled>▶ Sign it</button>
+   <button class="sec" id="loop">🔁 Loop: off</button>
+  </div>
+  <div class="row" style="margin-top:10px">
+   <div class="slider"><input type="checkbox" id="useFingers" checked><label for="useFingers">Fingers on</label></div>
+   <div class="slider"><input type="checkbox" id="useArms" checked><label for="useArms">Arms on</label></div>
+   <div class="slider">Speed <input type="range" id="speed" min="30" max="150" value="66"></div>
+   <div class="slider">Smoothing <input type="range" id="damp" min="10" max="100" value="55"></div>
+  </div>
+  <div class="row" style="margin-top:8px">
+   <button class="sec" id="restBtn">Reset to T-pose</button>
+  </div>
+  <div class="row" style="margin-top:8px">
+   <span style="font-size:.78rem;color:var(--muted)">If palms face the wrong way, try these:</span>
+   <div class="slider"><input type="checkbox" id="swapHands"><label for="swapHands">Swap L/R hands</label></div>
+   <div class="slider"><input type="checkbox" id="flipNormal"><label for="flipNormal">Flip palm normal</label></div>
+   <div class="slider"><input type="checkbox" id="flipFwd"><label for="flipFwd">Flip finger direction</label></div>
+   <div class="slider"><input type="checkbox" id="mirrorX"><label for="mirrorX">Mirror X axis</label></div>
+   <div class="slider"><input type="checkbox" id="showOverlay"><label for="showOverlay"><b>Show source keypoints</b> (red dots)</label></div>
+  </div>
+  <div class="status" id="status"></div>
+  <div class="status" id="diagStatus"></div>
+  <div class="chips" id="chips"></div>
+ </div>
+
+ <div id="holder"></div>
+
+ <div class="note">
+  Finger bones are aimed along the direction between consecutive MediaPipe hand landmarks.
+  Toggle "Fingers off" to compare against the arms-only version. Sign correctness still requires a fluent ISL signer.
+ </div>
+</div>
+
+<script>
+const POSE=33,HAND=21;
+const L_SH=11,R_SH=12,L_EL=13,R_EL=14,L_WR=15,R_WR=16;
+const LH_OFF=POSE*3, RH_OFF=(POSE+HAND)*3;
+
+// MediaPipe hand landmark chains: [base,mid,tip...] per finger
+const FINGER_CHAINS = {
+  Thumb:[1,2,3,4], Index:[5,6,7,8], Middle:[9,10,11,12], Ring:[13,14,15,16], Pinky:[17,18,19,20]
+};
+
+let scene,camera,renderer,controls,model=null,dict=null;
+let bones={},fingerBones={L:{},R:{}};
+let seq=null,idx=0,playing=false,looping=false,last=0,chipEls={},lookup={},frameMs=66;
+
+const holder=document.getElementById("holder");
+scene=new THREE.Scene(); scene.background=new THREE.Color(0x0a1618);
+camera=new THREE.PerspectiveCamera(32,holder.clientWidth/holder.clientHeight,0.1,3000);
+camera.position.set(0,145,260);
+renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(holder.clientWidth,holder.clientHeight);
+holder.appendChild(renderer.domElement);
+controls=new THREE.OrbitControls(camera,renderer.domElement);
+controls.target.set(0,120,0); controls.update();
+scene.add(new THREE.HemisphereLight(0xffffff,0x334444,1.15));
+const dl=new THREE.DirectionalLight(0xffffff,1.0); dl.position.set(120,300,220); scene.add(dl);
+scene.add(new THREE.GridHelper(400,20,0x1c3a38,0x14282c));
+// --- skeleton overlay: renders the raw keypoints in the same scene so you
+// --- can see exactly where the avatar diverges from the source data.
+const NUMP=POSE+2*HAND;
+const ovGroup=new THREE.Group(); ovGroup.visible=false; scene.add(ovGroup);
+const ovDots=[];
+const ovGeo=new THREE.SphereGeometry(1.4,8,8);
+const ovMat=new THREE.MeshBasicMaterial({color:0xff5566,depthTest:false});
+for(let i=0;i<NUMP;i++){const m=new THREE.Mesh(ovGeo,ovMat);m.renderOrder=999;ovGroup.add(m);ovDots.push(m);}
+let OV_SCALE=110, OV_Y=110;
+function drawOverlay(frame){
+ const displayFrame=orientHandsToForearms(frame);
+ for(let i=0;i<NUMP;i++){
+   ovDots[i].position.set(displayFrame[i*3]*OV_SCALE, -displayFrame[i*3+1]*OV_SCALE+OV_Y, displayFrame[i*3+2]*OV_SCALE);
+ }
+}
+(function anim(){requestAnimationFrame(anim);controls.update();renderer.render(scene,camera);})();
+
+// ---------- FBX ----------
+document.getElementById("fbx").addEventListener("change",e=>{
+ const f=e.target.files[0]; if(!f)return;
+ document.getElementById("loadStatus").textContent="Loading Y Bot...";
+ new THREE.FBXLoader().load(URL.createObjectURL(f),obj=>{
+   model=obj; model.traverse(c=>{if(c.isMesh)c.frustumCulled=false;});
+   scene.add(model); mapBones(); ready();
+   document.getElementById("dumpBtn").disabled=false;
+ },undefined,err=>{document.getElementById("loadStatus").textContent="FBX error: "+err;});
+});
+
+function clean(n){ return n.toLowerCase().replace(/mixamorig[:_]?/,""); }
+
+function mapBones(){
+ const want={LeftArm:"leftarm",LeftForeArm:"leftforearm",RightArm:"rightarm",
+             RightForeArm:"rightforearm",LeftHand:"lefthand",RightHand:"righthand"};
+ bones={}; fingerBones={L:{},R:{}};
+ model.traverse(o=>{
+   if(!o.isBone)return;
+   const n=clean(o.name);
+   for(const[k,p]of Object.entries(want)) if(!bones[k]&&n===p) bones[k]=o;
+   // finger bones: lefthandindex1..3 etc
+   const m=n.match(/^(left|right)hand(thumb|index|middle|ring|pinky)(\d)$/);
+   if(m){
+     const side=m[1]==="left"?"L":"R";
+     const fin=m[2].charAt(0).toUpperCase()+m[2].slice(1);
+     if(!fingerBones[side][fin]) fingerBones[side][fin]=[];
+     fingerBones[side][fin][parseInt(m[3])-1]=o;
+   }
+ });
+ [...Object.values(bones)].forEach(b=>b&&(b.userData.rest=b.quaternion.clone()));
+ ["L","R"].forEach(s=>Object.values(fingerBones[s]).forEach(arr=>arr.forEach(b=>b&&(b.userData.rest=b.quaternion.clone()))));
+
+ let log="ARM BONES:\n";
+ for(const k of Object.keys(want)) log+=`  ${k}: ${bones[k]?"FOUND":"** MISSING **"}\n`;
+ log+="\nFINGER BONES:\n";
+ let fcount=0;
+ for(const s of ["L","R"]){
+   const fins=Object.keys(fingerBones[s]);
+   log+=`  ${s==="L"?"Left":"Right"} hand: ${fins.length?fins.map(f=>f+"("+fingerBones[s][f].filter(Boolean).length+")").join(" "):"** NONE FOUND **"}\n`;
+   fins.forEach(f=>fcount+=fingerBones[s][f].filter(Boolean).length);
+ }
+ log+=`\nTotal finger bones: ${fcount}`;
+ if(fcount===0) log+="\n\n!! No finger bones detected. Press 'List all bones' and send me the output.";
+ document.getElementById("boneLog").textContent=log;
+}
+
+document.getElementById("dumpBtn").addEventListener("click",()=>{
+ let names=[]; model.traverse(o=>{if(o.isBone)names.push(o.name);});
+ document.getElementById("boneLog").textContent="ALL BONES ("+names.length+"):\n"+names.join("\n");
+});
+
+// ---------- dictionary ----------
+document.getElementById("json").addEventListener("change",e=>{
+ const f=e.target.files[0]; if(!f)return;
+ const r=new FileReader();
+ r.onload=ev=>{ dict=JSON.parse(ev.target.result);
+   lookup={}; for(const k of Object.keys(dict)){const s=k.toLowerCase();lookup[s]=k;
+     s.split(/[_,\s]+/).forEach(p=>{if(p&&!(p in lookup))lookup[p]=k;});}
+   document.getElementById("wordSel").innerHTML=Object.keys(dict).map(w=>`<option>${w}</option>`).join("");
+   ready();
+ };
+ r.readAsText(f);
+});
+function ready(){
+ const ok=model&&dict;
+ document.getElementById("play").disabled=!ok;
+ if(ok)document.getElementById("loadStatus").textContent="Ready.";
+}
+
+// ---------- retargeting ----------
+function pt(frame,i){return new THREE.Vector3(frame[i*3],-frame[i*3+1],frame[i*3+2]);}
+/* ROOT CAUSE (rebuilt).
+   Previous versions overwrote each bone's rotation, assuming every bone
+   rests pointing along +Y. Real rigs bake an arbitrary bind-pose rotation
+   into every bone, so overwriting it corrupts the whole chain - which is
+   why arms, elbows AND fingers were all wrong at once.
+   Correct approach: measure the bone's REST direction (from its bind pose,
+   toward its child), then rotate FROM that direction TO the target. */
+
+let ROT_DAMP=0.55;
+const EPS=1e-7;
+
+function captureRest(bone){
+ if(!bone||bone.userData.restCaptured) return;
+ bone.userData.restQuat=bone.quaternion.clone();
+ // rest direction = direction from this bone to its first child, in this
+ // bone's parent space (that is the axis the bone visually points along)
+ const child=bone.children.find(c=>c.isBone);
+ let dir=new THREE.Vector3(0,1,0);
+ if(child){
+   dir=child.position.clone();
+   if(dir.lengthSq()>1e-9){
+     dir.normalize();
+     dir.applyQuaternion(bone.quaternion);   // into parent space
+   } else dir.set(0,1,0);
+ }
+ bone.userData.restDir=dir.normalize();
+ bone.userData.restCaptured=true;
+}
+
+function captureHandRest(side){
+ const handBone=side==="L"?bones.LeftHand:bones.RightHand;
+ if(!handBone||handBone.userData.palmRestCaptured) return;
+ captureRest(handBone);
+ const findDesc=(suffix)=>{
+   const target=(side==="L"?"lefthand":"righthand")+suffix;
+   let out=null;
+   handBone.traverse(o=>{if(!out&&o.isBone&&clean(o.name)===target)out=o;});
+   return out;
+ };
+ const index=findDesc("index1");
+ const pinky=findDesc("pinky1");
+ const middle=findDesc("middle1");
+ handBone.updateWorldMatrix(true,true);
+ handBone.parent.updateWorldMatrix(true,true);
+ const wrist=new THREE.Vector3();
+ const i5=new THREE.Vector3();
+ const p17=new THREE.Vector3();
+ const m9=new THREE.Vector3();
+ handBone.getWorldPosition(wrist);
+ (index||middle||handBone).getWorldPosition(i5);
+ (pinky||middle||handBone).getWorldPosition(p17);
+ (middle||index||handBone).getWorldPosition(m9);
+ handBone.parent.worldToLocal(wrist);
+ handBone.parent.worldToLocal(i5);
+ handBone.parent.worldToLocal(p17);
+ handBone.parent.worldToLocal(m9);
+ const q=frameFromPalmPoints(wrist,i5,m9,p17,side,false);
+ handBone.userData.restPalmQuat=q||handBone.userData.restQuat.clone();
+ handBone.userData.palmRestCaptured=true;
+}
+
+/* Aim a bone so it points along worldDir, preserving its bind pose. */
+function aim(bone,worldDir){
+ if(!bone||worldDir.lengthSq()<1e-9)return;
+ captureRest(bone);
+ const parent=bone.parent;
+ parent.updateWorldMatrix(true,false);
+ const pq=new THREE.Quaternion();
+ parent.getWorldQuaternion(pq);
+ // target direction expressed in the bone's parent space
+ const local=worldDir.clone().normalize().applyQuaternion(pq.clone().invert());
+ // delta rotation from rest direction to target direction
+ const delta=new THREE.Quaternion().setFromUnitVectors(bone.userData.restDir,local);
+ const target=delta.multiply(bone.userData.restQuat);
+ bone.quaternion.slerp(target,ROT_DAMP);
+}
+/* ROOT CAUSE FIX.
+   MediaPipe's 21 hand landmarks are anchored to the pose wrist in the fixed
+   dictionary, but their local hand-frame rotation is still arbitrary. Before
+   computing any palm or finger rotation, swing the entire 21-point cluster
+   around landmark 0 so the hand forward axis (0 -> 9) follows the pose forearm
+   direction (elbow -> wrist). This keeps the hand attached while removing the
+   backwards-palm / starfish rotation error. */
+function opt(id){const e=document.getElementById(id);return e&&e.checked;}
+
+function handPtM(frame,off,i){
+ const b=off+i*3;
+ const mx=opt("mirrorX")?-1:1;
+ return new THREE.Vector3(mx*frame[b],-frame[b+1],frame[b+2]);
+}
+
+function frameFromPalmPoints(w,i5,m9,p17,sideName,useUiFlips=true){
+ let fwd=m9.clone().sub(w);
+ let across=i5.clone().sub(p17);
+ if(fwd.lengthSq()<EPS||across.lengthSq()<EPS) return null;
+ fwd.normalize();
+ across.normalize();
+ if(useUiFlips&&opt("flipFwd")) fwd.negate();
+ let normal=new THREE.Vector3().crossVectors(across,fwd);
+ if(normal.lengthSq()<EPS) return null;
+ normal.normalize();
+ if(sideName==="R") normal.negate();
+ if(useUiFlips&&opt("flipNormal")) normal.negate();
+ const xAxis=new THREE.Vector3().crossVectors(fwd,normal).normalize();
+ const m=new THREE.Matrix4().makeBasis(xAxis,fwd,normal);
+ return new THREE.Quaternion().setFromRotationMatrix(m);
+}
+
+function rotateHandClusterToForearm(frame,dataSide){
+ const out=frame.slice();
+ const off=dataSide==="L"?LH_OFF:RH_OFF;
+ const elbowIdx=dataSide==="L"?L_EL:R_EL;
+ const wristIdx=dataSide==="L"?L_WR:R_WR;
+ const wrist=pt(frame,wristIdx);
+ const elbow=pt(frame,elbowIdx);
+ const hWrist=handPtM(frame,off,0);
+ const hMiddle=handPtM(frame,off,9);
+ const source=hMiddle.clone().sub(hWrist);
+ const target=wrist.clone().sub(elbow);
+ if(source.lengthSq()<EPS||target.lengthSq()<EPS) return out;
+ source.normalize();
+ target.normalize();
+ const q=new THREE.Quaternion().setFromUnitVectors(source,target);
+ for(let i=0;i<HAND;i++){
+   const p=handPtM(frame,off,i).sub(hWrist).applyQuaternion(q).add(wrist);
+   const b=off+i*3;
+   const mx=opt("mirrorX")?-1:1;
+   out[b]=p.x*mx;
+   out[b+1]=-p.y;
+   out[b+2]=p.z;
+ }
+ return out;
+}
+
+function angleBetween(a,b){
+ if(a.lengthSq()<EPS||b.lengthSq()<EPS) return null;
+ return THREE.MathUtils.radToDeg(a.angleTo(b));
+}
+
+function handForwardForearmAngle(frame,dataSide){
+ const off=dataSide==="L"?LH_OFF:RH_OFF;
+ const elbowIdx=dataSide==="L"?L_EL:R_EL;
+ const wristIdx=dataSide==="L"?L_WR:R_WR;
+ return angleBetween(
+   handPtM(frame,off,9).sub(handPtM(frame,off,0)),
+   pt(frame,wristIdx).sub(pt(frame,elbowIdx))
+ );
+}
+
+function updateRetargetDiagnostics(rawFrame,orientedFrame){
+ const lb=handForwardForearmAngle(rawFrame,"L");
+ const rb=handForwardForearmAngle(rawFrame,"R");
+ const la=handForwardForearmAngle(orientedFrame,"L");
+ const ra=handForwardForearmAngle(orientedFrame,"R");
+ const fmt=v=>v==null?"n/a":v.toFixed(2)+"deg";
+ document.getElementById("diagStatus").textContent=
+   `Hand forward vs forearm: L ${fmt(lb)} -> ${fmt(la)}, R ${fmt(rb)} -> ${fmt(ra)}`;
+}
+
+function orientHandsToForearms(frame){
+ let out=rotateHandClusterToForearm(frame,"L");
+ out=rotateHandClusterToForearm(out,"R");
+ return out;
+}
+
+function palmFrame(frame,off,sideName){
+ const w=handPtM(frame,off,0), i5=handPtM(frame,off,5), m9=handPtM(frame,off,9), p17=handPtM(frame,off,17);
+ return frameFromPalmPoints(w,i5,m9,p17,sideName);
+}
+
+function applyHand(frame,dataSide){
+ // dataSide = which MediaPipe hand block to read.
+ // rigSide  = which of Y Bot's hands to drive. Swap decouples them.
+ const rigSide = opt("swapHands") ? (dataSide==="L"?"R":"L") : dataSide;
+ const off = dataSide==="L"?LH_OFF:RH_OFF;
+ const fb  = fingerBones[rigSide];
+ const handBone = rigSide==="L"?bones.LeftHand:bones.RightHand;
+
+ const targetPalmWorld=palmFrame(frame,off,rigSide);
+ if(!targetPalmWorld) return;
+
+ if(handBone){
+   captureHandRest(rigSide);
+   const parentQ=new THREE.Quaternion();
+   handBone.parent.updateWorldMatrix(true,false);
+   handBone.parent.getWorldQuaternion(parentQ);
+   const targetPalmLocal=targetPalmWorld.clone().premultiply(parentQ.clone().invert());
+  const delta=targetPalmLocal.multiply(handBone.userData.restPalmQuat.clone().invert());
+  const target=delta.multiply(handBone.userData.restQuat);
+  handBone.quaternion.slerp(target,ROT_DAMP);
+   handBone.updateWorldMatrix(true,true);
+ }
+
+ for(const[fin,chain]of Object.entries(FINGER_CHAINS)){
+   const arr=fb[fin]; if(!arr)continue;
+   for(let seg=0;seg<Math.min(3,chain.length-1);seg++){
+     const bone=arr[seg]; if(!bone)continue;
+     const a=handPtM(frame,off,chain[seg]), b=handPtM(frame,off,chain[seg+1]);
+     const d=b.clone().sub(a);
+     if(d.length()<1e-4) continue;
+     aim(bone,d);
+   }
+ }
+}
+
+function applyFrame(frame){
+ if(!model)return;
+ const orientedFrame=orientHandsToForearms(frame);
+ updateRetargetDiagnostics(frame,orientedFrame);
+ if(document.getElementById("useArms").checked){
+   const lsh=pt(orientedFrame,L_SH),rsh=pt(orientedFrame,R_SH),lel=pt(orientedFrame,L_EL),rel=pt(orientedFrame,R_EL),
+         lwr=pt(orientedFrame,L_WR),rwr=pt(orientedFrame,R_WR);
+   aim(bones.LeftArm,lel.clone().sub(lsh));
+   aim(bones.LeftForeArm,lwr.clone().sub(lel));
+   aim(bones.RightArm,rel.clone().sub(rsh));
+   aim(bones.RightForeArm,rwr.clone().sub(rel));
+ }
+ if(document.getElementById("useFingers").checked){
+   applyHand(orientedFrame,"L"); applyHand(orientedFrame,"R");
+ }
+}
+
+// ---------- playback ----------
+function lerp(a,b,t){const o=new Array(a.length);for(let i=0;i<a.length;i++)o[i]=a[i]+(b[i]-a[i])*t;return o;}
+function build(keys,blend=6){
+ const out=[];
+ keys.forEach((k,i)=>{
+  dict[k].forEach(f=>out.push({frame:f,key:k}));
+  if(i<keys.length-1){const l=dict[k][dict[k].length-1],n=dict[keys[i+1]][0];
+   for(let b=1;b<=blend;b++)out.push({frame:lerp(l,n,b/(blend+1)),key:null});}
+ });
+ return repairCollapsedHands(out);
+}
+
+function handCollapsed(frame,off){
+ const wx=frame[off], wy=frame[off+1], wz=frame[off+2];
+ let maxD=0;
+ for(let i=1;i<HAND;i++){
+   const b=off+i*3;
+   const dx=frame[b]-wx, dy=frame[b+1]-wy, dz=frame[b+2]-wz;
+   maxD=Math.max(maxD,dx*dx+dy*dy+dz*dz);
+ }
+ return maxD<1e-10;
+}
+
+function repairCollapsedHands(items){
+ const out=items.map(item=>({frame:item.frame.slice(),key:item.key}));
+ for(const off of [LH_OFF,RH_OFF]){
+   const good=[];
+   for(let i=0;i<out.length;i++) if(!handCollapsed(out[i].frame,off)) good.push(i);
+   if(!good.length) continue;
+   for(let i=0;i<out.length;i++){
+     if(good.includes(i)) continue;
+     let lo=good[0], hi=good[good.length-1];
+     for(const g of good){ if(g<=i) lo=g; if(g>=i){hi=g;break;} }
+     const t=lo===hi?0:(i-lo)/(hi-lo);
+     for(let j=0;j<HAND*3;j++){
+       out[i].frame[off+j]=out[lo].frame[off+j]+(out[hi].frame[off+j]-out[lo].frame[off+j])*t;
+     }
+   }
+ }
+ return out;
+}
+document.getElementById("speed").addEventListener("input",e=>{frameMs=+e.target.value;});
+document.getElementById("showOverlay").addEventListener("change",e=>{ovGroup.visible=e.target.checked;});
+document.getElementById("damp").addEventListener("input",e=>{ROT_DAMP=+e.target.value/100;});
+document.getElementById("restBtn").addEventListener("click",()=>{
+ playing=false;
+ const restore=b=>{ if(b&&b.userData.rest) b.quaternion.copy(b.userData.rest); };
+ Object.values(bones).forEach(restore);
+ ["L","R"].forEach(s=>Object.values(fingerBones[s]).forEach(a=>a.forEach(restore)));
+ document.getElementById("status").textContent="Reset to rest pose.";
+});
+(function tick(ts){
+ requestAnimationFrame(tick);
+ if(!playing||!seq)return;
+ if(ts-last<frameMs)return;
+ last=ts;
+ applyFrame(seq[idx].frame); if(ovGroup.visible)drawOverlay(seq[idx].frame); hi(seq[idx].key); idx++;
+ if(idx>=seq.length){ if(looping)idx=0; else{playing=false;clearHi();document.getElementById("status").textContent="Done.";}}
+})(0);
+function hi(k){clearHi();if(k&&chipEls[k])chipEls[k].classList.add("playing");}
+function clearHi(){Object.values(chipEls).forEach(c=>c.classList.remove("playing"));}
+
+function run(text){
+ const toks=text.toLowerCase().replace(/[^a-z'\s]/g,"").split(/\s+/).filter(Boolean);
+ const c=document.getElementById("chips");c.innerHTML="";chipEls={};const keys=[];
+ toks.forEach(t=>{const k=lookup[t]||null;const e=document.createElement("span");
+  e.className="chip "+(k?"matched":"unmatched");e.textContent=t;c.appendChild(e);
+  if(k){keys.push(k);chipEls[k]=e;}});
+ if(!keys.length){document.getElementById("status").textContent="No words matched.";return;}
+ seq=build(keys);idx=0;playing=true;
+ document.getElementById("status").textContent=`Signing ${keys.length} word(s)…`;
+}
+document.getElementById("play").addEventListener("click",()=>{
+ const t=document.getElementById("txt").value.trim();
+ if(t)run(t);
+ else{const w=document.getElementById("wordSel").value;seq=build([w]);idx=0;playing=true;
+  document.getElementById("chips").innerHTML="";chipEls={};
+  document.getElementById("status").textContent=`Signing "${w}".`;}
+});
+document.getElementById("loop").addEventListener("click",e=>{looping=!looping;e.target.textContent=`🔁 Loop: ${looping?"on":"off"}`;});
+</script>
+</body>
+</html>

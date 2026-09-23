@@ -1,0 +1,1836 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="isl-api-base" content="">
+<meta name="isl-runtime-base" content="">
+<meta name="isl-runtime-index-url" content="">
+<meta name="isl-bootstrap-url" content="">
+<title>ODYSSEY | ISL MVP</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<style>
+  :root{--bg:#071716;--panel:#102524;--ink:#edf8f4;--muted:#90aaa4;--line:#21413d;--accent:#f2b642;--green:#2eb36f;--bad:#db6a52}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  .app{height:100vh;display:grid;grid-template-columns:310px minmax(0,1fr)}
+  aside{background:var(--panel);border-right:1px solid var(--line);padding:16px;display:flex;flex-direction:column;gap:14px}
+  h1{font-size:1.05rem;margin:0;font-weight:750}
+  .sub{font-size:.82rem;color:var(--muted);line-height:1.45}
+  .field{display:grid;gap:7px}
+  label{font-size:.76rem;color:var(--muted);font-weight:650}
+  textarea{min-height:96px;resize:vertical;background:#0a1d1b;color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:10px;font:inherit;line-height:1.35}
+  button,select{height:38px;border:0;border-radius:8px;font:inherit;font-weight:700}
+  input[type=range]{width:100%;accent-color:var(--accent);cursor:pointer}
+  .rangeRow{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center}
+  .rangeValue{min-width:52px;text-align:right;color:var(--ink);font-size:.78rem;font-variant-numeric:tabular-nums}
+  button{background:var(--accent);color:#1b1304;cursor:pointer}
+  button.secondary{background:#193632;color:var(--ink);border:1px solid var(--line)}
+  button:active{transform:translateY(1px)}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .row>*{flex:1}
+  .pillbox{display:flex;flex-wrap:wrap;gap:6px}
+  .pill{background:#193632;border:1px solid var(--line);border-radius:999px;padding:5px 9px;font-size:.78rem;color:var(--muted)}
+  .pill.active{background:var(--accent);border-color:var(--accent);color:#1b1304}
+  .pill.fallback{background:#23354d;border-color:#496b91;color:#c6e0ff}
+  .pill.missing{background:#351b18;border-color:#63302a;color:#ffb5a8}
+  .status{font-size:.78rem;color:var(--muted);line-height:1.45;min-height:34px}
+  main{position:relative;min-width:0}
+  #stage{position:absolute;inset:0}
+  .hud{position:absolute;left:18px;right:18px;bottom:18px;display:flex;gap:10px;align-items:center;pointer-events:none}
+  .meter{height:8px;flex:1;background:#0c2220;border:1px solid var(--line);border-radius:99px;overflow:hidden}
+  .bar{height:100%;width:0;background:linear-gradient(90deg,var(--green),var(--accent))}
+  .word{min-width:118px;text-align:right;color:var(--muted);font-size:.82rem}
+  @media(max-width:760px){.app{grid-template-columns:1fr;grid-template-rows:auto 1fr}aside{border-right:0;border-bottom:1px solid var(--line)}textarea{min-height:64px}}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <div>
+      <h1>ODYSSEY | Real-Time ISL Avatar</h1>
+      <div class="sub">Speech or text becomes validated sign poses on a custom 3D avatar rig.</div>
+    </div>
+    <div class="field">
+      <label for="sentence">Sentence</label>
+      <textarea id="sentence" placeholder="Type a sentence to translate into available ISL signs"></textarea>
+    </div>
+    <div class="row">
+      <button id="playBtn">Sign</button>
+      <button class="secondary" id="speechBtn">Mic</button>
+    </div>
+    <div class="field">
+      <label for="speechLanguage">Speech language</label>
+      <select id="speechLanguage">
+        <option value="hi-IN">Hindi</option>
+        <option value="ml-IN">Malayalam</option>
+        <option value="ta-IN">Tamil</option>
+        <option value="en-IN" selected>English</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="speedControl">Avatar speed</label>
+      <div class="rangeRow">
+        <input id="speedControl" type="range" min="0.25" max="2.5" step="0.05" value="0.80" aria-label="Avatar speed">
+        <span class="rangeValue" id="speedValue">0.80x</span>
+      </div>
+    </div>
+    <div class="row">
+      <button class="secondary" id="frontBtn">Front</button>
+      <button class="secondary" id="sideBtn">Side</button>
+      <button class="secondary" id="debugBtn">Debug</button>
+    </div>
+    <div class="field">
+      <label>Recognized signs</label>
+      <div class="pillbox" id="tokens"></div>
+    </div>
+    <div class="status" id="status">Ready.</div>
+  </aside>
+  <main>
+    <div id="stage"></div>
+    <div class="hud">
+      <div class="meter"><div class="bar" id="bar"></div></div>
+      <div class="word" id="currentWord">idle</div>
+    </div>
+  </main>
+</div>
+
+<script>
+const API_BASE=(document.querySelector('meta[name="isl-api-base"]')?.content||"").replace(/\/$/,"");
+const RUNTIME_BASE=(document.querySelector('meta[name="isl-runtime-base"]')?.content||"").replace(/\/$/,"");
+const RUNTIME_INDEX_URL=(document.querySelector('meta[name="isl-runtime-index-url"]')?.content||"").trim();
+const BOOTSTRAP_URL=(document.querySelector('meta[name="isl-bootstrap-url"]')?.content||"").trim();
+if("serviceWorker" in navigator&&location.protocol==="https:")window.addEventListener("load",()=>navigator.serviceWorker.register("service-worker.js").catch(()=>null));
+function apiUrl(path){return `${API_BASE}${path}`}
+const stage=document.getElementById("stage");
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x071716);
+const camera=new THREE.PerspectiveCamera(35,stage.clientWidth/stage.clientHeight,0.1,2000);
+camera.position.set(0,112,345);
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+renderer.setSize(stage.clientWidth,stage.clientHeight);
+renderer.outputEncoding=THREE.sRGBEncoding;
+renderer.toneMapping=THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure=1.05;
+renderer.shadowMap.enabled=true;
+stage.appendChild(renderer.domElement);
+const controls=new THREE.OrbitControls(camera,renderer.domElement);
+controls.target.set(0,78,0);
+controls.enableDamping=true;
+scene.add(new THREE.HemisphereLight(0xfff5df,0x163736,.82));
+const key=new THREE.DirectionalLight(0xfff7e8,1.05);
+key.position.set(-120,240,180);
+key.castShadow=true;
+scene.add(key);
+const fill=new THREE.DirectionalLight(0x9fc8ff,.38);
+fill.position.set(120,140,320);
+scene.add(fill);
+const rim=new THREE.DirectionalLight(0xffd2aa,.42);
+rim.position.set(0,170,-220);
+scene.add(rim);
+scene.add(new THREE.GridHelper(360,18,0x21413d,0x112a27));
+
+const skin=new THREE.MeshStandardMaterial({color:0xf1b58d,roughness:.62,side:THREE.DoubleSide});
+const shirt=new THREE.MeshStandardMaterial({color:0x17283d,roughness:.72});
+const green=new THREE.MeshStandardMaterial({color:0x0c1726,roughness:.72});
+const shorts=new THREE.MeshStandardMaterial({color:0x26374d,roughness:.78});
+const trousers=new THREE.MeshStandardMaterial({color:0x172333,roughness:.8});
+const shoes=new THREE.MeshStandardMaterial({color:0x101820,roughness:.62});
+const hairMat=new THREE.MeshStandardMaterial({color:0x2b1710,roughness:.8});
+const eyeMat=new THREE.MeshStandardMaterial({color:0x33221a,roughness:.35});
+const lineMat=new THREE.LineBasicMaterial({color:0xff5d70,depthTest:false});
+const root=new THREE.Group();
+scene.add(root);
+const formalGroup=new THREE.Group();
+// The current GLB has one combined body material and no clothing meshes. Keep
+// the experimental overlay disabled until a properly fitted suit asset is
+// available; it must never compromise the hand/arm retargeter.
+formalGroup.visible=false;
+scene.add(formalGroup);
+const suitMat=new THREE.MeshStandardMaterial({color:0x18232d,roughness:.48,metalness:.06,side:THREE.DoubleSide});
+const shirtMat=new THREE.MeshStandardMaterial({color:0xe5e8e6,roughness:.58,side:THREE.DoubleSide});
+const tieMat=new THREE.MeshStandardMaterial({color:0x263c5a,roughness:.42,side:THREE.DoubleSide});
+let formalParts=null;
+// The procedural avatar is the stable product default. The realistic GLB is
+// opt-in until its bone retargeting passes the same hand-stability checks.
+const USE_REALISTIC_AVATAR=new URLSearchParams(location.search).get("real")==="1";
+let realisticAvatar=null;
+
+function mesh(geo,mat,pos,scale,parent=root){
+  const m=new THREE.Mesh(geo,mat);
+  m.position.copy(pos||new THREE.Vector3());
+  if(scale)m.scale.copy(scale);
+  m.castShadow=true;
+  m.receiveShadow=true;
+  parent.add(m);
+  return m;
+}
+
+function roundedPalmGeometry(width=10,height=12,depth=1.25,radius=2.1){
+  const halfW=width/2,halfH=height/2;
+  const shape=new THREE.Shape();
+  shape.moveTo(-halfW+radius,-halfH);
+  shape.lineTo(halfW-radius,-halfH);
+  shape.quadraticCurveTo(halfW,-halfH,halfW,-halfH+radius);
+  shape.lineTo(halfW,halfH-radius);
+  shape.quadraticCurveTo(halfW,halfH,halfW-radius,halfH);
+  shape.lineTo(-halfW+radius,halfH);
+  shape.quadraticCurveTo(-halfW,halfH,-halfW,halfH-radius);
+  shape.lineTo(-halfW,-halfH+radius);
+  shape.quadraticCurveTo(-halfW,-halfH,-halfW+radius,-halfH);
+  const geometry=new THREE.ExtrudeGeometry(shape,{depth,bevelEnabled:true,bevelSize:.22,bevelThickness:.22,bevelSegments:2,curveSegments:12});
+  geometry.translate(0,0,-depth/2);
+  return geometry;
+}
+
+// A bone never scales its whole group: that would stretch the joint spheres into spikes.
+function capsule(radius,mat,capScale=1){
+  const g=new THREE.Group();
+  const cyl=mesh(new THREE.CylinderGeometry(radius,radius,1,18),mat,new THREE.Vector3(),null,g);
+  const top=mesh(new THREE.SphereGeometry(radius,18,10),mat,new THREE.Vector3(),null,g);
+  const bot=mesh(new THREE.SphereGeometry(radius,18,10),mat,new THREE.Vector3(),null,g);
+  g.userData={cyl,top,bot,capScale};
+  return g;
+}
+
+function setSegment(group,a,b){
+  const mid=a.clone().add(b).multiplyScalar(.5);
+  const dir=b.clone().sub(a);
+  const rawLength=dir.length();
+  if(!Number.isFinite(rawLength)||rawLength<1e-4){
+    group.visible=false;
+    return;
+  }
+  group.visible=true;
+  const length=rawLength;
+  group.position.copy(mid);
+  group.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),dir.multiplyScalar(1/length));
+  group.userData.cyl.scale.set(1,length,1);
+  group.userData.top.position.y=length/2;
+  group.userData.bot.position.y=-length/2;
+  const capScale=group.userData.capScale||1;
+  group.userData.top.scale.setScalar(capScale);
+  group.userData.bot.scale.setScalar(capScale);
+}
+
+const face={};
+function addAvatar(){
+  mesh(new THREE.SphereGeometry(21,32,20),skin,new THREE.Vector3(0,124,0),new THREE.Vector3(1,.98,.94));
+  mesh(new THREE.SphereGeometry(22,32,16),hairMat,new THREE.Vector3(0,136,-2),new THREE.Vector3(1.03,.42,.88));
+  for(let i=0;i<7;i++){
+    const tuft=mesh(new THREE.ConeGeometry(6,16,12),hairMat,new THREE.Vector3(-17+i*5.7,142+Math.sin(i)*2.5,4+Math.cos(i)*2));
+    tuft.rotation.z=(-.7+i*.23);
+    tuft.rotation.x=.75;
+  }
+  face.leftEye=mesh(new THREE.SphereGeometry(2.35,16,12),eyeMat,new THREE.Vector3(-7.5,127,19.5));
+  face.rightEye=mesh(new THREE.SphereGeometry(2.35,16,12),eyeMat,new THREE.Vector3(7.5,127,19.5));
+  face.leftBrow=mesh(new THREE.BoxGeometry(11,1.8,1.8),hairMat,new THREE.Vector3(-7.5,135,19.5));
+  face.rightBrow=mesh(new THREE.BoxGeometry(11,1.8,1.8),hairMat,new THREE.Vector3(7.5,135,19.5));
+  face.leftBrow.rotation.z=.12;
+  face.rightBrow.rotation.z=-.12;
+  mesh(new THREE.SphereGeometry(2.8,16,8),new THREE.MeshStandardMaterial({color:0xe68f82}),new THREE.Vector3(0,121,20.5),new THREE.Vector3(.8,.55,.45));
+  face.mouth=mesh(new THREE.TorusGeometry(5.5,.8,8,24,.95),new THREE.MeshStandardMaterial({color:0x9d4d44}),new THREE.Vector3(0,115,20));
+  face.mouth.rotation.x=Math.PI;
+  mesh(new THREE.SphereGeometry(4.5,16,12),skin,new THREE.Vector3(-21,124,0),new THREE.Vector3(.55,.9,.42));
+  mesh(new THREE.SphereGeometry(4.5,16,12),skin,new THREE.Vector3(21,124,0),new THREE.Vector3(.55,.9,.42));
+  mesh(new THREE.CylinderGeometry(8,9,12,24),skin,new THREE.Vector3(0,105,0));
+  const torsoProfile=[
+    new THREE.Vector2(0,-34),new THREE.Vector2(13,-33),new THREE.Vector2(18,-27),
+    new THREE.Vector2(21,-17),new THREE.Vector2(22,0),new THREE.Vector2(21,17),
+    new THREE.Vector2(19,28),new THREE.Vector2(14,34),new THREE.Vector2(0,35)
+  ];
+  mesh(new THREE.LatheGeometry(torsoProfile,32),shirt,new THREE.Vector3(0,73,0));
+  mesh(new THREE.SphereGeometry(1,24,16),shirt,new THREE.Vector3(-24,91,0),new THREE.Vector3(7,6,9));
+  mesh(new THREE.SphereGeometry(1,24,16),shirt,new THREE.Vector3(24,91,0),new THREE.Vector3(7,6,9));
+  mesh(new THREE.CylinderGeometry(15,17,4,32),green,new THREE.Vector3(0,101,0));
+  mesh(new THREE.CylinderGeometry(19,21,5,32),green,new THREE.Vector3(0,46,0));
+  const pelvisProfile=[
+    new THREE.Vector2(0,-17),new THREE.Vector2(16,-16),new THREE.Vector2(20,-10),
+    new THREE.Vector2(22,0),new THREE.Vector2(20,10),new THREE.Vector2(16,16),new THREE.Vector2(0,17)
+  ];
+  mesh(new THREE.LatheGeometry(pelvisProfile,32),shorts,new THREE.Vector3(0,24,0),new THREE.Vector3(.9,1,.92));
+  const leftLeg=capsule(6.2,trousers,.86); root.add(leftLeg); setSegment(leftLeg,new THREE.Vector3(-13,10,0),new THREE.Vector3(-13,-24,0));
+  const rightLeg=capsule(6.2,trousers,.86); root.add(rightLeg); setSegment(rightLeg,new THREE.Vector3(13,10,0),new THREE.Vector3(13,-24,0));
+  mesh(new THREE.SphereGeometry(1,20,14),shoes,new THREE.Vector3(-13,-28,5),new THREE.Vector3(8,5,11));
+  mesh(new THREE.SphereGeometry(1,20,14),shoes,new THREE.Vector3(13,-28,5),new THREE.Vector3(8,5,11));
+}
+addAvatar();
+
+function addFormalOutfit(){
+  formalGroup.clear();
+  formalGroup.scale.set(1,1,1);
+  formalGroup.position.set(0,0,0);
+  const shape=new THREE.Shape();
+  shape.moveTo(-19,50); shape.lineTo(-22,89); shape.lineTo(-15,103);
+  shape.lineTo(15,103); shape.lineTo(22,89); shape.lineTo(19,50); shape.closePath();
+  const shirt=new THREE.Mesh(new THREE.ExtrudeGeometry(shape,{depth:2,bevelEnabled:true,bevelSize:1,bevelThickness:.5,bevelSegments:2}),suitMat);
+  shirt.position.set(0,0,21); shirt.castShadow=true; shirt.receiveShadow=true;
+  formalGroup.add(shirt);
+  const collar=new THREE.Mesh(new THREE.ConeGeometry(7,10,4),shirtMat);
+  collar.scale.set(1,.55,.18); collar.position.set(0,96,23); collar.rotation.y=Math.PI/4;
+  collar.castShadow=true; formalGroup.add(collar);
+  formalParts={shirt,collar};
+}
+addFormalOutfit();
+
+function updateFormalOutfit(avatar){
+  if(!formalParts||!avatar)return;
+  const point=name=>avatar.bones[name]?.bone.getWorldPosition(new THREE.Vector3());
+  const leftShoulder=point("LeftArm"),leftElbow=point("LeftForeArm");
+  const rightShoulder=point("RightArm"),rightElbow=point("RightForeArm");
+  void leftShoulder; void leftElbow; void rightShoulder; void rightElbow;
+}
+
+const EXPRESSIONS={
+  neutral:{brow:0,eye:1,mouth:0},
+  friendly:{brow:.12,eye:1,mouth:.45},
+  question:{brow:.7,eye:1.18,mouth:-.1},
+  concern:{brow:-.35,eye:.82,mouth:-.45},
+  emphasis:{brow:.28,eye:1.08,mouth:.1}
+};
+function applyExpression(name,amount=1){
+  const e=EXPRESSIONS[name]||EXPRESSIONS.neutral;
+  const browY=135+e.brow*4*amount;
+  face.leftBrow.position.y=browY;
+  face.rightBrow.position.y=browY;
+  face.leftBrow.rotation.z=.12-e.brow*.32*amount;
+  face.rightBrow.rotation.z=-.12+e.brow*.32*amount;
+  face.leftEye.scale.y=1+(e.eye-1)*amount;
+  face.rightEye.scale.y=1+(e.eye-1)*amount;
+  face.mouth.scale.y=1+e.mouth*.55*amount;
+  face.mouth.position.y=115+e.mouth*2.2*amount;
+}
+
+const debugGroup=new THREE.Group();
+debugGroup.visible=false;
+scene.add(debugGroup);
+const debugLines=[];
+for(let i=0;i<48;i++){
+  const l=new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]),lineMat);
+  l.renderOrder=20;
+  debugGroup.add(l);
+  debugLines.push(l);
+}
+const debugPointPositions=new Float32Array(42*3);
+const debugDots=new THREE.Points(new THREE.BufferGeometry(),new THREE.PointsMaterial({color:0xffd36a,size:3.5,sizeAttenuation:true,depthTest:false}));
+debugDots.geometry.setAttribute("position",new THREE.BufferAttribute(debugPointPositions,3));
+debugDots.renderOrder=21;
+debugGroup.add(debugDots);
+
+class HandRig{
+  constructor(side){
+    this.side=side;
+    this.group=new THREE.Group();
+    // The idle hand is deliberately a little fuller than the sparse pose
+    // landmarks so it remains readable after a recorded clip completes.
+    this.group.scale.set(.74,.74,.74);
+    root.add(this.group);
+    this.palm=mesh(roundedPalmGeometry(12,14,2.4,2.5),skin,new THREE.Vector3(0,7,0),null,this.group);
+    this.wristBand=capsule(2.4,skin,.32);
+    this.group.add(this.wristBand);
+    this.fingers=[];
+    this.knuckles=[];
+    const bases=[-7,-3.25,.5,4.25,7.5];
+    const lens=[[6.8,5.1,3.8],[9,6.8,4.3],[10.2,7.6,4.8],[9.4,6.9,4.3],[7.7,5.4,3.7]];
+    for(let f=0;f<5;f++){
+      const parts=[];
+      for(let s=0;s<3;s++){
+        const g=capsule(f===0?1.65:1.55,skin,.38);
+        this.group.add(g);
+        parts.push(g);
+      }
+      this.fingers.push({base:bases[f],lens:lens[f],parts});
+      const knuckle=capsule(f===0?1.85:1.7,skin,.42);
+      this.group.add(knuckle);
+      this.knuckles.push(knuckle);
+    }
+  }
+  setPose(wrist,quat,curl,spread){
+    this.group.position.copy(wrist);
+    this.group.quaternion.copy(quat);
+    // Dataset clips position the palm in local coordinates to match their
+    // landmark cluster. A procedural/idle pose must restore that local palm
+    // transform, otherwise a completed clip leaves a collapsed hand behind.
+    this.palm.position.set(0,7,0);
+    this.palm.quaternion.identity();
+    this.palm.scale.set(1,1,1);
+    setSegment(this.wristBand,new THREE.Vector3(0,0,0),new THREE.Vector3(0,4,0));
+    const sideSign=this.side==="L"?1:-1;
+    this.fingers.forEach((finger,f)=>{
+      let p=new THREE.Vector3(finger.base,14,0);
+      let dir=new THREE.Vector3((f-2)*.035+(spread[f]||0)*sideSign*.45,1,-(curl[f]||0)*.95).normalize();
+      if(f===0){
+        p.set(sideSign*9.4,5.5,1.2);
+        dir.set(sideSign*(.8+(spread[f]||0)),.45,-(curl[f]||0)*.9).normalize();
+      }
+      setSegment(this.knuckles[f],new THREE.Vector3(0,8,0),p);
+      for(let s=0;s<3;s++){
+        const bend=(curl[f]||0)*(s+1)*.28;
+        const nextDir=dir.clone().applyAxisAngle(new THREE.Vector3(sideSign,0,0),-bend).normalize();
+        const a=p.clone();
+        const b=p.clone().add(nextDir.multiplyScalar(finger.lens[s]));
+        setSegment(finger.parts[s],a,b);
+        p=b;
+        dir=nextDir;
+      }
+    });
+  }
+  setLandmarks(points){
+    // A complete-looking landmark array can still contain a collapsed palm or
+    // zero-length finger bones. Refuse the entire frame in that case: showing
+    // a stable open hand is safer than detaching the palm from the wrist.
+    if(!Array.isArray(points)||points.length!==21||points.some(point=>!point||!Number.isFinite(point.x)||!Number.isFinite(point.y)||!Number.isFinite(point.z)))return false;
+    const wrist=points[0];
+    const palmWidth=points[5].distanceTo(points[17]);
+    const span=Math.max(...points.map(point=>point.distanceTo(wrist)));
+    const plane=points[5].clone().sub(wrist).cross(points[17].clone().sub(wrist)).length();
+    const chains=[[0,1,2,3,4],[0,5,6,7,8],[0,9,10,11,12],[0,13,14,15,16],[0,17,18,19,20]];
+    const lengths=chains.map(chain=>chain.slice(0,-1).reduce((sum,joint,index)=>sum+points[chain[index]].distanceTo(points[joint]),0));
+    if(palmWidth<4||palmWidth>22||span<14||span>40||plane<6||lengths.some(length=>length<4||length>42))return false;
+    const forward=points[9].clone().sub(wrist).normalize();
+    const normal=points[5].clone().sub(wrist).cross(points[17].clone().sub(wrist)).normalize();
+    this.group.position.copy(wrist);
+    this.group.quaternion.copy(qFromPalm(forward,normal,this.side));
+    this.group.updateMatrixWorld(true);
+    const local=points.map(point=>this.group.worldToLocal(point.clone()));
+    // Keep the palm, wrist connector, and fingers driven by the same landmark frame.
+    const palmCenter=local[0].clone().multiplyScalar(.2)
+      .add(local[5].clone().multiplyScalar(.4))
+      .add(local[17].clone().multiplyScalar(.4));
+    this.palm.position.copy(palmCenter);
+    setSegment(this.wristBand,local[0],palmCenter);
+    chains.forEach((chain,f)=>{
+      setSegment(this.knuckles[f],palmCenter,local[chain[1]]);
+      for(let s=0;s<3;s++) setSegment(this.fingers[f].parts[s],local[chain[s+1]],local[chain[s+2]]);
+    });
+    return true;
+  }
+}
+
+class ArmRig{
+  constructor(side){
+    this.side=side;
+    this.upper=capsule(5,skin);
+    this.fore=capsule(4.5,skin);
+    root.add(this.upper,this.fore);
+    this.hand=new HandRig(side);
+  }
+  setPose(pose){
+    setSegment(this.upper,pose.shoulder,pose.elbow);
+    setSegment(this.fore,pose.elbow,pose.wrist);
+    if(pose.landmarks&&this.hand.setLandmarks(pose.landmarks))return;
+    this.hand.setPose(pose.wrist,pose.handQ,pose.curl,pose.spread);
+  }
+}
+
+const arms={L:new ArmRig("L"),R:new ArmRig("R")};
+const basePose={
+  L:{shoulder:new THREE.Vector3(-31,91,0),elbow:new THREE.Vector3(-54,65,14),wrist:new THREE.Vector3(-47,43,30),palm:new THREE.Vector3(-.15,1,.35),curl:[.15,.15,.15,.15,.15],spread:[.1,.05,0,-.04,-.08]},
+  R:{shoulder:new THREE.Vector3(31,91,0),elbow:new THREE.Vector3(54,65,14),wrist:new THREE.Vector3(47,43,30),palm:new THREE.Vector3(.15,1,.35),curl:[.15,.15,.15,.15,.15],spread:[-.1,-.05,0,.04,.08]}
+};
+
+const REAL_FINGER_BONES={
+  thumb:["Thumb1","Thumb2","Thumb3"],index:["Index1","Index2","Index3"],
+  middle:["Middle1","Middle2","Middle3"],ring:["Ring1","Ring2","Ring3"],pinky:["Pinky1","Pinky2","Pinky3"]
+};
+const REAL_FINGER_CHAINS={thumb:[1,2,3,4],index:[5,6,7,8],middle:[9,10,11,12],ring:[13,14,15,16],pinky:[17,18,19,20]};
+
+function captureRealAvatarBones(model){
+  model.updateMatrixWorld(true);
+  const bones={};
+  model.traverse(object=>{if(object.isBone)bones[object.name]={bone:object,restQ:object.getWorldQuaternion(new THREE.Quaternion()),restDir:null}});
+  Object.values(bones).forEach(entry=>{
+    const child=entry.bone.children.find(item=>item.isBone);
+    const origin=entry.bone.getWorldPosition(new THREE.Vector3());
+    const end=child?child.getWorldPosition(new THREE.Vector3()):origin.clone().add(new THREE.Vector3(0,1,0).applyQuaternion(entry.restQ));
+    entry.restDir=end.sub(origin).normalize();
+  });
+  ["Left","Right"].forEach(side=>{
+    const hand=bones[side+"Hand"]?.bone;
+    const middle=bones[side+"HandMiddle1"]?.bone;
+    const index=bones[side+"HandIndex1"]?.bone;
+    const pinky=bones[side+"HandPinky1"]?.bone;
+    if(!hand||!middle||!index||!pinky)return;
+    const origin=hand.getWorldPosition(new THREE.Vector3());
+    const forward=middle.getWorldPosition(new THREE.Vector3()).sub(origin);
+    const normal=index.getWorldPosition(new THREE.Vector3()).sub(origin)
+      .cross(pinky.getWorldPosition(new THREE.Vector3()).sub(origin));
+    bones[side+"Hand"].restPalmQ=qFromPalm(forward,normal,side[0]);
+  });
+  return bones;
+}
+
+function aimRealBone(avatar,name,from,to){
+  const entry=avatar.bones[name];
+  if(!entry)return;
+  const direction=to.clone().sub(from);
+  if(direction.lengthSq()<1e-8)return;
+  const delta=new THREE.Quaternion().setFromUnitVectors(entry.restDir,direction.normalize());
+  const targetWorld=delta.multiply(entry.restQ);
+  const parentWorld=entry.bone.parent?entry.bone.parent.getWorldQuaternion(new THREE.Quaternion()):new THREE.Quaternion();
+  const targetLocal=parentWorld.invert().multiply(targetWorld);
+  // Keep the bind-pose quaternion and ease toward the delta target. Directly
+  // replacing a Mixamo local quaternion causes visible pops and finger drift.
+  entry.bone.quaternion.slerp(targetLocal,0.58);
+  entry.bone.updateMatrixWorld(true);
+}
+
+function pinRealBone(avatar,name,target){
+  const entry=avatar.bones[name];
+  if(!entry||!entry.bone.parent)return;
+  const current=entry.bone.getWorldPosition(new THREE.Vector3());
+  const delta=target.clone().sub(current);
+  if(delta.lengthSq()<1e-8)return;
+  const parent=entry.bone.parent;
+  const parentRotation=parent.getWorldQuaternion(new THREE.Quaternion()).invert();
+  const parentScale=parent.getWorldScale(new THREE.Vector3());
+  delta.applyQuaternion(parentRotation);
+  delta.x/=Math.max(.0001,parentScale.x);
+  delta.y/=Math.max(.0001,parentScale.y);
+  delta.z/=Math.max(.0001,parentScale.z);
+  entry.bone.position.add(delta);
+  entry.bone.updateMatrixWorld(true);
+}
+
+function orientRealPalm(avatar,prefix,points,side){
+  const entry=avatar.bones[prefix+"Hand"];
+  if(!entry||!points||points.length<18)return;
+  const forward=points[9].clone().sub(points[0]);
+  const normal=points[5].clone().sub(points[0]).cross(points[17].clone().sub(points[0]));
+  if(forward.lengthSq()<1e-8||normal.lengthSq()<1e-8)return;
+  const targetPalmQ=qFromPalm(forward,normal,side);
+  // Solve against the captured bind-pose palm frame. Measuring the already
+  // deformed hand here compounds the previous frame's error and twists the
+  // fingers around the wrist.
+  const restPalmQ=entry.restPalmQ||entry.restQ;
+  const targetWorld=targetPalmQ.clone().multiply(restPalmQ.clone().invert()).multiply(entry.restQ);
+  const parentWorld=entry.bone.parent?entry.bone.parent.getWorldQuaternion(new THREE.Quaternion()):new THREE.Quaternion();
+  const targetLocal=parentWorld.invert().multiply(targetWorld);
+  entry.bone.quaternion.slerp(targetLocal,0.72);
+  entry.bone.updateMatrixWorld(true);
+}
+
+function setRealAvatarPose(poses){
+  const avatar=realisticAvatar;
+  if(!avatar)return;
+  const applySide=(sourceSide,prefix)=>{
+    const p=poses[sourceSide];
+    aimRealBone(avatar,prefix+"Arm",p.shoulder,p.elbow);
+    aimRealBone(avatar,prefix+"ForeArm",p.elbow,p.wrist);
+    if(!p.landmarks)return;
+    const handOrigin=avatar.bones[prefix+"Hand"]?.bone.getWorldPosition(new THREE.Vector3());
+    if(!handOrigin)return;
+    const sourceWrist=p.landmarks[0];
+    // Preserve the avatar's bone chain. Translate the source hand shape onto
+    // the actual avatar wrist instead of moving the hand bone and stretching
+    // the forearm to compensate for different skeleton proportions.
+    const targetPoints=p.landmarks.map(point=>handOrigin.clone().add(point.clone().sub(sourceWrist).multiplyScalar(.82)));
+    const previous=avatar.handTargets[sourceSide];
+    const points=targetPoints.map((point,index)=>previous?.[index]?.clone().lerp(point,.68)||point);
+    avatar.handTargets[sourceSide]=points.map(point=>point.clone());
+    orientRealPalm(avatar,prefix,points,sourceSide);
+    Object.entries(REAL_FINGER_CHAINS).forEach(([finger,chain])=>{
+      const names=REAL_FINGER_BONES[finger];
+      for(let i=0;i<3;i++)aimRealBone(avatar,prefix+names[i],points[chain[i]],points[chain[i+1]]);
+    });
+  };
+  // The GLB faces the camera: anatomical Left is on the viewer's right.
+  // Dataset sides are subject-anatomical, so crossing this mapping would
+  // pull both upper arms through the neck.
+  applySide("L","Right");
+  applySide("R","Left");
+  avatar.model.updateMatrixWorld(true);
+}
+
+function loadRealAvatar(){
+  if(!USE_REALISTIC_AVATAR)return;
+  if(!window.THREE||!THREE.GLTFLoader)return;
+  new THREE.GLTFLoader().load("avatar/Avaturn-male-avatar.glb",gltf=>{
+    const model=gltf.scene;
+    model.traverse(object=>{
+      if(!object.isMesh)return;
+      const materials=Array.isArray(object.material)?object.material:[object.material];
+      materials.forEach(material=>{material.side=THREE.DoubleSide;material.needsUpdate=true});
+    });
+    const bounds=new THREE.Box3().setFromObject(model);
+    const height=Math.max(.001,bounds.max.y-bounds.min.y);
+    model.scale.setScalar(170/height);
+    model.updateMatrixWorld(true);
+    const hips=model.getObjectByName("Hips");
+    if(hips){const hipPosition=hips.getWorldPosition(new THREE.Vector3());model.position.y+=24-hipPosition.y;}
+    model.updateMatrixWorld(true);
+    realisticAvatar={model,bones:captureRealAvatarBones(model),handTargets:{L:null,R:null}};
+    window.__realisticAvatar=realisticAvatar;
+    scene.add(model);
+    root.visible=false;
+    formalGroup.visible=false;
+    status.textContent="Realistic Avaturn avatar ready."
+  },undefined,error=>{
+    realisticAvatar=null;
+    formalGroup.visible=false;
+    status.textContent="Procedural avatar active; realistic model could not be loaded.";
+    console.error("Avatar load failed",error);
+  });
+}
+
+function qFromPalm(forward,normal,side){
+  const y=forward.lengthSq()>1e-8?forward.clone().normalize():new THREE.Vector3(0,1,0);
+  let z=normal.lengthSq()>1e-8?normal.clone():new THREE.Vector3(0,0,1);
+  z.addScaledVector(y,-z.dot(y));
+  if(z.lengthSq()<1e-8){
+    z=new THREE.Vector3(0,0,1);
+    z.addScaledVector(y,-z.dot(y));
+  }
+  z.normalize();
+  if(side==="R") z.negate();
+  const x=new THREE.Vector3().crossVectors(y,z);
+  if(x.lengthSq()<1e-8)return new THREE.Quaternion();
+  x.normalize();
+  z.crossVectors(x,y).normalize();
+  return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x,y,z));
+}
+
+function pose(side,overrides){
+  const p=basePose[side];
+  const o=overrides||{};
+  const wrist=(o.wrist||p.wrist).clone();
+  // Positive Z is camera-facing. Keep procedural hands clear of the torso.
+  wrist.z=Math.max(wrist.z,28);
+  const elbow=o.elbow||p.elbow;
+  const fore=wrist.clone().sub(elbow).normalize();
+  const palm=o.palm||p.palm;
+  return {
+    shoulder:p.shoulder.clone(),
+    elbow:elbow.clone(),
+    wrist:wrist.clone(),
+    handQ:qFromPalm(o.forward||fore,palm,side),
+    curl:o.curl||p.curl,
+    spread:o.spread||p.spread
+  };
+}
+
+const SIGN_LIBRARY={
+  hello:[
+    {t:0,L:pose("L"),R:pose("R",{elbow:new THREE.Vector3(53,89,14),wrist:new THREE.Vector3(48,110,28),forward:new THREE.Vector3(-.2,.8,.55),palm:new THREE.Vector3(0,0,1),curl:[.05,.05,.05,.05,.05],spread:[.25,.12,0,-.12,-.24]})},
+    {t:.5,L:pose("L"),R:pose("R",{elbow:new THREE.Vector3(48,94,20),wrist:new THREE.Vector3(35,121,32),forward:new THREE.Vector3(-.55,.48,.68),palm:new THREE.Vector3(0,0,1),curl:[.05,.05,.05,.05,.05],spread:[.25,.12,0,-.12,-.24]})},
+    {t:1,L:pose("L"),R:pose("R",{elbow:new THREE.Vector3(53,89,14),wrist:new THREE.Vector3(48,110,28),forward:new THREE.Vector3(-.2,.8,.55),palm:new THREE.Vector3(0,0,1),curl:[.05,.05,.05,.05,.05],spread:[.25,.12,0,-.12,-.24]})}
+  ],
+  please:[
+    {t:0,L:pose("L"),R:pose("R",{elbow:new THREE.Vector3(34,72,21),wrist:new THREE.Vector3(13,70,31),forward:new THREE.Vector3(-.65,.05,.25),palm:new THREE.Vector3(0,0,1),curl:[.05,.05,.05,.05,.05],spread:[.05,.02,0,-.02,-.05]})},
+    {t:.5,L:pose("L"),R:pose("R",{elbow:new THREE.Vector3(32,73,18),wrist:new THREE.Vector3(-8,69,33),forward:new THREE.Vector3(-.7,-.02,.18),palm:new THREE.Vector3(0,0,1),curl:[.05,.05,.05,.05,.05],spread:[.05,.02,0,-.02,-.05]})},
+    {t:1,L:pose("L"),R:pose("R",{elbow:new THREE.Vector3(34,72,21),wrist:new THREE.Vector3(13,70,31),forward:new THREE.Vector3(-.65,.05,.25),palm:new THREE.Vector3(0,0,1),curl:[.05,.05,.05,.05,.05],spread:[.05,.02,0,-.02,-.05]})}
+  ],
+  help:[
+    {t:0,L:pose("L",{elbow:new THREE.Vector3(-42,70,18),wrist:new THREE.Vector3(-18,61,34),forward:new THREE.Vector3(.55,.18,.22),palm:new THREE.Vector3(0,0,1),curl:[.25,.08,.08,.08,.08]}),R:pose("R",{elbow:new THREE.Vector3(42,71,18),wrist:new THREE.Vector3(11,69,37),forward:new THREE.Vector3(-.5,.13,.25),palm:new THREE.Vector3(0,0,1),curl:[.9,.9,.9,.9,.9]})},
+    {t:1,L:pose("L",{elbow:new THREE.Vector3(-37,82,18),wrist:new THREE.Vector3(-14,80,35),forward:new THREE.Vector3(.55,.18,.22),palm:new THREE.Vector3(0,0,1),curl:[.25,.08,.08,.08,.08]}),R:pose("R",{elbow:new THREE.Vector3(37,83,18),wrist:new THREE.Vector3(8,86,38),forward:new THREE.Vector3(-.5,.13,.25),palm:new THREE.Vector3(0,0,1),curl:[.9,.9,.9,.9,.9]})}
+  ],
+  "thank you":[
+    {t:0,L:pose("L"),R:pose("R",{elbow:new THREE.Vector3(38,86,14),wrist:new THREE.Vector3(12,111,28),forward:new THREE.Vector3(-.25,.3,.9),palm:new THREE.Vector3(0,0,1),curl:[.05,.05,.05,.05,.05],spread:[.15,.07,0,-.07,-.15]})},
+    {t:1,L:pose("L"),R:pose("R",{elbow:new THREE.Vector3(42,79,16),wrist:new THREE.Vector3(33,83,58),forward:new THREE.Vector3(.15,.05,1),palm:new THREE.Vector3(0,0,1),curl:[.05,.05,.05,.05,.05],spread:[.15,.07,0,-.07,-.15]})}
+  ],
+  yes:[
+    {t:0,L:pose("L"),R:pose("R",{elbow:new THREE.Vector3(44,76,18),wrist:new THREE.Vector3(35,92,34),forward:new THREE.Vector3(0,1,.2),palm:new THREE.Vector3(.8,0,.2),curl:[.85,.9,.9,.9,.9]})},
+    {t:.5,L:pose("L"),R:pose("R",{elbow:new THREE.Vector3(44,76,18),wrist:new THREE.Vector3(35,82,36),forward:new THREE.Vector3(0,-.35,.25),palm:new THREE.Vector3(.8,0,.2),curl:[.85,.9,.9,.9,.9]})},
+    {t:1,L:pose("L"),R:pose("R",{elbow:new THREE.Vector3(44,76,18),wrist:new THREE.Vector3(35,92,34),forward:new THREE.Vector3(0,1,.2),palm:new THREE.Vector3(.8,0,.2),curl:[.85,.9,.9,.9,.9]})}
+  ],
+  no:[
+    {t:0,L:pose("L"),R:pose("R",{elbow:new THREE.Vector3(45,83,16),wrist:new THREE.Vector3(38,101,35),forward:new THREE.Vector3(-.1,.9,.25),palm:new THREE.Vector3(0,0,1),curl:[.9,.05,.05,.92,.92],spread:[.2,.05,0,0,0]})},
+    {t:1,L:pose("L"),R:pose("R",{elbow:new THREE.Vector3(43,82,16),wrist:new THREE.Vector3(31,96,36),forward:new THREE.Vector3(-.35,.75,.22),palm:new THREE.Vector3(0,0,1),curl:[.9,.25,.25,.92,.92],spread:[.05,0,0,0,0]})}
+  ]
+};
+
+const DATASET_LIBRARY={};
+const DATASET_ALIASES={
+  hello:"hello hi",hi:"hello hi",not:"don't care",i:"i me mine my",my:"i me mine my",
+  love:"like love",school:"college school",schools:"college school",thanks:"grateful",
+  meeting:"meet",meetings:"meet",mobile:"phone",friends:"friend",children:"child",
+  people:"person",doctor:"medicine",going:"go",went:"go",gone:"go",are:"become",
+  pleased:"please"
+};
+const DEMO_PHRASEBOOK={
+  // Curated meeting utterances. Values are ISL gloss tokens, not word-for-word translations.
+  "good morning":["good"],"good afternoon":["good"],"hello everyone":["hello"],"thank you everyone":["thank you"],
+  "can you hear me":["hear","i"],"can everybody hear me":["hear","i"],"please repeat":["please","repeat"],
+  "please speak slowly":["please","slower"],"speak slowly":["slower"],"let us start the meeting":["meet"],
+  "good evening":["good"],"can you repeat that":["repeat"],"please wait":["please","wait"],
+  "i need help":["i","need","help"],"i cannot understand":["not","understand"],"i cannot see":["not","see"],
+  "what is your name":["what","your","name"],"where are you":["where","you"],"how are you":["how","you"],
+  "my name is":["i","name"],"i am fine":["i","fine"],"i do not understand":["not","understand"],
+  "i cannot hear you":["not","hear","i"],"see you later":["meet"],
+  "नमस्ते":["hello"],"सभी को नमस्ते":["hello"],"सुप्रभात":["good"],"धन्यवाद":["thank you"],
+  "कृपया मेरी मदद करें":["please","help"],"क्या आप मुझे सुन सकते हैं":["hear","i"],"क्या आप मुझे सुन पा रहे हैं":["hear","i"],
+  "कृपया दोहराएं":["please","repeat"],"फिर से बोलिए":["repeat"],"धीरे बोलिए":["slower"],"कृपया धीरे बोलिए":["please","slower"],
+  "मीटिंग शुरू करें":["meet"],"कक्षा शुरू करें":["class"],"आज की कक्षा":["today","class"],
+  "मेरा नाम":["i","name"],"मेरा फोन":["i","phone"],"मैं ठीक हूँ":["i","fine"],"मैं खुश हूँ":["i","happy"],
+  "हाँ":["yes"],"जी हाँ":["yes"],"नहीं":["no"],"मुझे समझ नहीं आया":["not","understand"],"बाद में मिलते हैं":["meet"],
+
+  "നമസ്കാരം":["hello"],"എല്ലാവർക്കും നമസ്കാരം":["hello"],"സുപ്രഭാതം":["good"],"നന്ദി":["thank you"],
+  "ദയവായി എന്നെ സഹായിക്കൂ":["please","help"],"ദയവായി സഹായിക്കൂ":["please","help"],"എനിക്ക് കേൾക്കാമോ":["hear","i"],"എന്നെ കേൾക്കാമോ":["hear","i"],
+  "ദയവായി ആവർത്തിക്കൂ":["please","repeat"],"വീണ്ടും പറയൂ":["repeat"],"പതുക്കെ പറയൂ":["slower"],"ദയവായി പതുക്കെ പറയൂ":["please","slower"],
+  "യോഗം തുടങ്ങാം":["meet"],"ക്ലാസ് തുടങ്ങാം":["class"],"ഇന്നത്തെ ക്ലാസ്":["today","class"],
+  "എന്റെ പേര്":["i","name"],"എന്റെ ഫോൺ":["i","phone"],"എനിക്ക് സുഖമാണ്":["i","fine"],"എനിക്ക് സന്തോഷമാണ്":["i","happy"],
+  "അതെ":["yes"],"അതേ":["yes"],"ഇല്ല":["no"],"എനിക്ക് മനസ്സിലായില്ല":["not","understand"],"പിന്നെ കാണാം":["meet"],
+
+  "வணக்கம்":["hello"],"அனைவருக்கும் வணக்கம்":["hello"],"காலை வணக்கம்":["good"],"நன்றி":["thank you"],
+  "தயவுசெய்து எனக்கு உதவுங்கள்":["please","help"],"தயவுசெய்து உதவுங்கள்":["please","help"],"எனக்குக் கேட்கிறதா":["hear","i"],"என்னைக் கேட்க முடியுமா":["hear","i"],
+  "தயவுசெய்து மீண்டும் சொல்லுங்கள்":["please","repeat"],"மீண்டும் சொல்லுங்கள்":["repeat"],"மெதுவாக பேசுங்கள்":["slower"],"தயவுசெய்து மெதுவாக பேசுங்கள்":["please","slower"],
+  "கூட்டத்தை தொடங்கலாம்":["meet"],"வகுப்பை தொடங்கலாம்":["class"],"இன்றைய வகுப்பு":["today","class"],
+  "என் பெயர்":["i","name"],"என் தொலைபேசி":["i","phone"],"நான் நலமாக இருக்கிறேன்":["i","fine"],"நான் மகிழ்ச்சியாக இருக்கிறேன்":["i","happy"],
+  "ஆம்":["yes"],"ஆமாம்":["yes"],"இல்லை":["no"],"எனக்கு புரியவில்லை":["not","understand"],"பிறகு சந்திப்போம்":["meet"]
+};
+const WORD_EXPRESSIONS={
+  hello:"friendly",good:"friendly",thank:"friendly","thank you":"friendly",please:"friendly",
+  help:"concern",yes:"emphasis",no:"emphasis",how:"question",what:"question",where:"question",
+  when:"question",hear:"question",repeat:"question",slower:"concern",afraid:"concern",
+  angry:"emphasis",happy:"friendly",understand:"concern"
+};
+function lookupCandidates(word){
+  const raw=String(word||"").toLowerCase().trim().replace(/[’']/g,"").replace(/[-/]+/g," ").replace(/\s+/g," ");
+  if(!raw)return [];
+  const out=[raw];
+  const alias=DATASET_ALIASES[raw];
+  if(alias)out.push(alias);
+  const add=(value)=>{if(value&&!out.includes(value))out.push(value)};
+  if(raw.endsWith("ies")&&raw.length>3)add(raw.slice(0,-3)+"y");
+  if(raw.endsWith("ing")&&raw.length>5){add(raw.slice(0,-3));add(raw.slice(0,-3)+"e")}
+  if(raw.endsWith("ed")&&raw.length>4){add(raw.slice(0,-2));add(raw.slice(0,-1))}
+  if(raw.endsWith("es")&&raw.length>4)add(raw.slice(0,-2));
+  if(raw.endsWith("s")&&raw.length>3)add(raw.slice(0,-1));
+  return out;
+}
+function prepareManifest(manifest){
+  if(!manifest||!manifest.signs)return manifest;
+  // Source datasets contain a small number of keys with doubled underscores,
+  // punctuation, and other spelling variants. Preserve the original key for
+  // shard lookup while exposing one canonical browser lookup key.
+  const canonical={};
+  Object.keys(manifest.signs).forEach(rawKey=>{
+    const normalized=rawKey.toUpperCase().replace(/[^A-Z0-9]+/g,"_").replace(/^_|_$/g,"");
+    if(normalized&&!canonical[normalized])canonical[normalized]=rawKey;
+  });
+  manifest.canonicalSigns=canonical;
+  return manifest;
+}
+function signKeyForManifest(manifest,word){
+  if(!manifest)return null;
+  for(const candidate of lookupCandidates(word)){
+    const key=candidate.toUpperCase().replace(/[^A-Z0-9]+/g,"_").replace(/^_|_$/g,"");
+    if(manifest.signs[key])return key;
+    if(manifest.canonicalSigns?.[key])return manifest.canonicalSigns[key];
+  }
+  return null;
+}
+function signFor(word){
+  for(const candidate of lookupCandidates(word)){
+    if(SIGN_LIBRARY[candidate])return SIGN_LIBRARY[candidate];
+    if(DATASET_LIBRARY[candidate])return DATASET_LIBRARY[candidate];
+  }
+  return null;
+}
+// A visible fallback is preferable to dropping an unfamiliar name or term.
+// These are deliberately marked as manual spelling until an ISL signer has
+// reviewed the alphabet handshapes on the final avatar rig.
+const SPELLING_SHAPES={
+  A:[.94,.94,.94,.94,.94],B:[.65,.05,.05,.05,.05],C:[.42,.38,.38,.4,.42],D:[.92,.05,.92,.92,.92],
+  E:[.78,.72,.7,.72,.75],F:[.82,.12,.18,.18,.2],G:[.75,.08,.88,.9,.9],H:[.85,.1,.1,.9,.9],
+  I:[.92,.92,.92,.92,.08],J:[.9,.9,.9,.9,.1],K:[.8,.08,.1,.9,.92],L:[.08,.08,.92,.92,.92],
+  M:[.94,.58,.58,.58,.92],N:[.92,.38,.38,.9,.92],O:[.42,.42,.42,.42,.42],P:[.86,.1,.18,.9,.92],
+  Q:[.86,.14,.9,.9,.92],R:[.88,.12,.12,.92,.92],S:[.96,.96,.96,.96,.96],T:[.96,.72,.96,.96,.96],
+  U:[.9,.1,.1,.9,.92],V:[.9,.08,.08,.92,.92],W:[.9,.06,.06,.06,.92],X:[.92,.28,.92,.92,.92],
+  Y:[.08,.92,.92,.92,.08],Z:[.84,.12,.92,.92,.92],
+  0:[.42,.42,.42,.42,.42],1:[.08,.92,.92,.92,.92],2:[.08,.08,.92,.92,.92],3:[.08,.08,.08,.92,.92],
+  4:[.92,.08,.08,.92,.92],5:[.05,.05,.05,.05,.05],6:[.78,.08,.08,.08,.08],7:[.92,.92,.08,.08,.08],
+  8:[.92,.08,.08,.08,.92],9:[.92,.92,.08,.08,.08]
+};
+function spellingClip(letter){
+  const curl=SPELLING_SHAPES[letter]||SPELLING_SHAPES.A;
+  const base={
+    elbow:new THREE.Vector3(41,78,18),wrist:new THREE.Vector3(28,92,42),
+    forward:new THREE.Vector3(-.22,.72,.65),palm:new THREE.Vector3(0,0,1),
+    curl,spread:[.1,.05,0,-.05,-.1]
+  };
+  const lift={...base,wrist:new THREE.Vector3(25,96,45)};
+  return [{t:0,L:pose("L"),R:pose("R",base)},{t:.5,L:pose("L"),R:pose("R",lift)},{t:1,L:pose("L"),R:pose("R",base)}];
+}
+function fallbackClip(word){
+  const letters=[...word.toUpperCase()].filter(letter=>SPELLING_SHAPES[letter]);
+  return letters.flatMap((letter,index)=>
+    spellingClip(letter).map(keyframe=>({...keyframe,t:(index+keyframe.t)/letters.length,letter}))
+  );
+}
+// Do not let a generic spelling pose impersonate an ISL word sign.  A word is
+// playable only when a reviewed procedural or recorded dataset clip exists.
+function canRenderWord(word){return Boolean(signFor(word))}
+let CISLR_MANIFEST=null;
+const CISLR_LOADED_SHARDS=new Set();
+const CISLR_LOADING_SHARDS=new Map();
+let BRIDGECONN_MANIFEST=null;
+const BRIDGECONN_LOADED_SHARDS=new Set();
+const BRIDGECONN_LOADING_SHARDS=new Map();
+let OFFICIAL_MANIFEST=null;
+const OFFICIAL_LOADED_SHARDS=new Set();
+const OFFICIAL_LOADING_SHARDS=new Map();
+let INCLUDE_MANIFEST=null;
+const INCLUDE_LOADED_SHARDS=new Set();
+const INCLUDE_LOADING_SHARDS=new Map();
+let ISLRTC_MANIFEST=null;
+const ISLRTC_LOADED_SHARDS=new Set();
+const ISLRTC_LOADING_SHARDS=new Map();
+let ISLRTC_V3_MANIFEST=null;
+const ISLRTC_V3_LOADED_SHARDS=new Set();
+const ISLRTC_V3_LOADING_SHARDS=new Map();
+let SENTENCE_MANIFEST=null;
+let SENTENCE_SHARD_LOADED=false;
+let SENTENCE_SHARD_LOADING=null;
+let ISL500_MANIFEST=null;
+const ISL500_LOADED_SHARDS=new Set();
+const ISL500_LOADING_SHARDS=new Map();
+let ISIGN_MANIFEST=null;
+const ISIGN_LOADED_SHARDS=new Set();
+const ISIGN_LOADING_SHARDS=new Map();
+let KAGGLE_SOCIAL_MANIFEST=null;
+const KAGGLE_SOCIAL_LOADED_SHARDS=new Set();
+const KAGGLE_SOCIAL_LOADING_SHARDS=new Map();
+async function fetchJsonWithTimeout(url,timeoutMs=8000){
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),timeoutMs);
+  try{
+    const response=await fetch(url,{cache:"no-store",signal:controller.signal});
+    if(!response.ok)throw new Error(response.status);
+    return await response.json();
+  }finally{clearTimeout(timer)}
+}
+function cislrKey(word){
+  return signKeyForManifest(CISLR_MANIFEST,word);
+}
+function bridgeconnKey(word){
+  return signKeyForManifest(BRIDGECONN_MANIFEST,word);
+}
+function officialKey(word){
+  return signKeyForManifest(OFFICIAL_MANIFEST,word);
+}
+function includeKey(word){
+  return signKeyForManifest(INCLUDE_MANIFEST,word);
+}
+function islrtcKey(word){
+  return signKeyForManifest(ISLRTC_MANIFEST,word);
+}
+function islrtcV3Key(word){
+  return signKeyForManifest(ISLRTC_V3_MANIFEST,word);
+}
+function sentenceKey(text){
+  return text.toUpperCase().replace(/[^A-Z0-9]+/g,"_").replace(/^_|_$/g,"");
+}
+function kaggleSocialKey(word){
+  return signKeyForManifest(KAGGLE_SOCIAL_MANIFEST,word);
+}
+function isignKey(word){return signKeyForManifest(ISIGN_MANIFEST,word)}
+function hasSign(word){return Boolean(signFor(word)||cislrKey(word)||bridgeconnKey(word)||officialKey(word)||includeKey(word)||islrtcKey(word)||islrtcV3Key(word)||isignKey(word)||kaggleSocialKey(word))}
+function isLandmarkFrame(frame){
+  return Array.isArray(frame)&&frame.length===225&&frame.every(value=>Number.isFinite(value));
+}
+function sequenceQuality(sequence){
+  let usableFrames=0,handFrames=0;
+  sequence.forEach(frame=>{
+    if(!isLandmarkFrame(frame))return;
+    const leftMissing=collapsedHand(frame,33),rightMissing=collapsedHand(frame,54);
+    if(!leftMissing||!rightMissing)usableFrames++;
+    handFrames+=Number(!leftMissing)+Number(!rightMissing);
+  });
+  return {usableFrames,handFrames,score:usableFrames*2+handFrames*.25};
+}
+function selectLandmarkSequence(raw){
+  if(!Array.isArray(raw)||!raw.length)return null;
+  if(isLandmarkFrame(raw[0]))return raw;
+  // Several supplemental datasets store multiple 30-frame takes beneath each
+  // word key. The previous loader treated those takes as frames, which sent
+  // 30x225 arrays into the rig and produced broken hands. Choose the take with
+  // the most valid, non-collapsed hand frames before registering it.
+  const candidates=raw.filter(sequence=>Array.isArray(sequence)&&isLandmarkFrame(sequence[0]));
+  if(!candidates.length)return null;
+  const chosen=candidates.slice().sort((a,b)=>sequenceQuality(b).score-sequenceQuality(a).score||b.length-a.length)[0];
+  // A source whose hands are absent for most of a clip must not be promoted
+  // over a later, cleaner source for the same gloss.
+  return sequenceQuality(chosen).usableFrames>=Math.ceil(chosen.length*.5)?chosen:null;
+}
+function registerDatasetClip(key,rawFrames){
+  const frames=selectLandmarkSequence(rawFrames);
+  if(!frames)return;
+  const clip=frames.map(frame=>frame.slice());
+  repairClip(clip,33); repairClip(clip,54);
+  repairPartialHandPoints(clip,33); repairPartialHandPoints(clip,54);
+  DATASET_LIBRARY[key.toLowerCase().replace(/_/g," ")]=clip.map((frame,i)=>({t:i/Math.max(1,clip.length-1),dataset:frame,expression:"neutral"}));
+}
+async function loadCislrManifest(){
+  try{
+    CISLR_MANIFEST=prepareManifest(await fetchJsonWithTimeout("signal_dictionary_cislr/manifest.json"));
+    if(typeof status!=="undefined"&&!playing)status.textContent=`CISLR index ready: ${CISLR_MANIFEST.sign_count} signs available for lazy loading.`;
+    return CISLR_MANIFEST;
+  }catch(error){return null}
+}
+async function loadBridgeconnManifest(){
+  try{return BRIDGECONN_MANIFEST=prepareManifest(await fetchJsonWithTimeout("signal_dictionary_bridgeconn/manifest.json"))}
+  catch(error){return null}
+}
+async function ensureCislrSigns(words){
+  const needed=new Set();
+  words.forEach(word=>{
+    const key=cislrKey(word);
+    if(key)needed.add(CISLR_MANIFEST.signs[key].shard);
+  });
+  await Promise.all([...needed].map(async shard=>{
+    if(CISLR_LOADED_SHARDS.has(shard))return;
+    if(!CISLR_LOADING_SHARDS.has(shard)){
+      const loading=fetchJsonWithTimeout(`signal_dictionary_cislr/${shard}`).then(data=>{
+          Object.entries(data).forEach(([key,frames])=>registerDatasetClip(key,frames));
+          CISLR_LOADED_SHARDS.add(shard);
+        }).catch(error=>{
+          CISLR_LOADING_SHARDS.delete(shard);
+          throw error;
+        });
+      CISLR_LOADING_SHARDS.set(shard,loading);
+    }
+    await CISLR_LOADING_SHARDS.get(shard);
+  }));
+}
+async function ensureBridgeconnSigns(words){
+  if(!BRIDGECONN_MANIFEST)return;
+  const needed=new Set();
+  words.forEach(word=>{
+    // BridgeConn is supplemental only: never replace a base or CISLR sign.
+    if(signFor(word)||cislrKey(word))return;
+    const key=bridgeconnKey(word);
+    if(key)needed.add(BRIDGECONN_MANIFEST.signs[key].shard);
+  });
+  await Promise.all([...needed].map(async shard=>{
+    if(BRIDGECONN_LOADED_SHARDS.has(shard))return;
+    if(!BRIDGECONN_LOADING_SHARDS.has(shard)){
+      const loading=fetchJsonWithTimeout(`signal_dictionary_bridgeconn/${shard}`).then(data=>{
+        Object.entries(data).forEach(([key,frames])=>registerDatasetClip(key,frames));
+        BRIDGECONN_LOADED_SHARDS.add(shard);
+      }).catch(error=>{
+        BRIDGECONN_LOADING_SHARDS.delete(shard);
+        throw error;
+      });
+      BRIDGECONN_LOADING_SHARDS.set(shard,loading);
+    }
+    await BRIDGECONN_LOADING_SHARDS.get(shard);
+  }));
+}
+async function loadOfficialManifest(){
+  try{return OFFICIAL_MANIFEST=prepareManifest(await fetchJsonWithTimeout("signal_dictionary_official/manifest.json"))}
+  catch(error){return null}
+}
+async function ensureOfficialSigns(words){
+  if(!OFFICIAL_MANIFEST)return;
+  const needed=new Set();
+  words.forEach(word=>{
+    if(signFor(word)||cislrKey(word)||bridgeconnKey(word))return;
+    const key=officialKey(word);
+    if(key)needed.add(OFFICIAL_MANIFEST.signs[key].shard);
+  });
+  await Promise.all([...needed].map(async shard=>{
+    if(OFFICIAL_LOADED_SHARDS.has(shard))return;
+    if(!OFFICIAL_LOADING_SHARDS.has(shard)){
+      const loading=fetchJsonWithTimeout(`signal_dictionary_official/${shard}`).then(data=>{
+        Object.entries(data).forEach(([key,frames])=>registerDatasetClip(key,frames));
+        OFFICIAL_LOADED_SHARDS.add(shard);
+      }).catch(error=>{
+        OFFICIAL_LOADING_SHARDS.delete(shard);
+        throw error;
+      });
+      OFFICIAL_LOADING_SHARDS.set(shard,loading);
+    }
+    await OFFICIAL_LOADING_SHARDS.get(shard);
+  }));
+}
+async function loadIncludeManifest(){
+  try{return INCLUDE_MANIFEST=prepareManifest(await fetchJsonWithTimeout("signal_dictionary_include/manifest.json"))}
+  catch(error){return null}
+}
+async function ensureIncludeSigns(words){
+  if(!INCLUDE_MANIFEST)return;
+  const needed=new Set();
+  words.forEach(word=>{
+    if(signFor(word)||cislrKey(word)||bridgeconnKey(word)||officialKey(word))return;
+    const key=includeKey(word);
+    if(key)needed.add(INCLUDE_MANIFEST.signs[key].shard);
+  });
+  await Promise.all([...needed].map(async shard=>{
+    if(INCLUDE_LOADED_SHARDS.has(shard))return;
+    if(!INCLUDE_LOADING_SHARDS.has(shard)){
+      const loading=fetchJsonWithTimeout(`signal_dictionary_include/${shard}`).then(data=>{
+        Object.entries(data).forEach(([key,frames])=>registerDatasetClip(key,frames));
+        INCLUDE_LOADED_SHARDS.add(shard);
+      }).catch(error=>{
+        INCLUDE_LOADING_SHARDS.delete(shard);
+        throw error;
+      });
+      INCLUDE_LOADING_SHARDS.set(shard,loading);
+    }
+    await INCLUDE_LOADING_SHARDS.get(shard);
+  }));
+}
+async function loadIslrtcManifest(){
+  try{return ISLRTC_MANIFEST=prepareManifest(await fetchJsonWithTimeout("signal_dictionary_islrtc_batch/manifest.json"))}
+  catch(error){return null}
+}
+async function ensureIslrtcSigns(words){
+  if(!ISLRTC_MANIFEST)return;
+  const needed=new Set();
+  words.forEach(word=>{
+    if(signFor(word)||cislrKey(word)||bridgeconnKey(word)||officialKey(word)||includeKey(word))return;
+    const key=islrtcKey(word);
+    if(key)needed.add(ISLRTC_MANIFEST.signs[key].shard);
+  });
+  await Promise.all([...needed].map(async shard=>{
+    if(ISLRTC_LOADED_SHARDS.has(shard))return;
+    if(!ISLRTC_LOADING_SHARDS.has(shard)){
+      const loading=fetchJsonWithTimeout(`signal_dictionary_islrtc_batch/${shard}`).then(data=>{
+        Object.entries(data).forEach(([key,frames])=>registerDatasetClip(key,frames));
+        ISLRTC_LOADED_SHARDS.add(shard);
+      }).catch(error=>{
+        ISLRTC_LOADING_SHARDS.delete(shard);
+        throw error;
+      });
+      ISLRTC_LOADING_SHARDS.set(shard,loading);
+    }
+    await ISLRTC_LOADING_SHARDS.get(shard);
+  }));
+}
+async function loadIslrtcV3Manifest(){
+  try{return ISLRTC_V3_MANIFEST=prepareManifest(await fetchJsonWithTimeout("signal_dictionary_islrtc_batch_v3/manifest.json"))}
+  catch(error){return null}
+}
+async function ensureIslrtcV3Signs(words){
+  if(!ISLRTC_V3_MANIFEST)return;
+  const needed=new Set();
+  words.forEach(word=>{
+    if(signFor(word)||cislrKey(word)||bridgeconnKey(word)||officialKey(word)||includeKey(word)||islrtcKey(word))return;
+    const key=islrtcV3Key(word);
+    if(key)needed.add(ISLRTC_V3_MANIFEST.signs[key].shard);
+  });
+  await Promise.all([...needed].map(async shard=>{
+    if(ISLRTC_V3_LOADED_SHARDS.has(shard))return;
+    if(!ISLRTC_V3_LOADING_SHARDS.has(shard)){
+      const loading=fetchJsonWithTimeout(`signal_dictionary_islrtc_batch_v3/${shard}`).then(data=>{
+        Object.entries(data).forEach(([key,frames])=>registerDatasetClip(key,frames));
+        ISLRTC_V3_LOADED_SHARDS.add(shard);
+      }).catch(error=>{
+        ISLRTC_V3_LOADING_SHARDS.delete(shard);
+        throw error;
+      });
+      ISLRTC_V3_LOADING_SHARDS.set(shard,loading);
+    }
+    await ISLRTC_V3_LOADING_SHARDS.get(shard);
+  }));
+}
+async function loadSentenceManifest(){
+  try{return SENTENCE_MANIFEST=prepareManifest(await fetchJsonWithTimeout("signal_dictionary_islrtc_sentences/manifest.json"))}
+  catch(error){return null}
+}
+async function ensureSentenceClip(text){
+  if(!SENTENCE_MANIFEST||!text||SENTENCE_SHARD_LOADED)return;
+  const key=sentenceKey(text);
+  if(!SENTENCE_MANIFEST.signs[key])return;
+  if(!SENTENCE_SHARD_LOADING){
+    SENTENCE_SHARD_LOADING=fetchJsonWithTimeout(`signal_dictionary_islrtc_sentences/${SENTENCE_MANIFEST.signs[key].shard}`).then(data=>{
+      Object.entries(data).forEach(([name,frames])=>registerDatasetClip(name,frames));
+      SENTENCE_SHARD_LOADED=true;
+    });
+  }
+  await SENTENCE_SHARD_LOADING;
+}
+async function loadIsl500Manifest(){
+  try{return ISL500_MANIFEST=prepareManifest(await fetchJsonWithTimeout("signal_dictionary_isl500/manifest.json"))}
+  catch(error){return null}
+}
+async function ensureIsl500Signs(words){
+  if(!ISL500_MANIFEST)return;
+  const needed=new Set();
+  words.forEach(word=>{
+    if(signFor(word)||cislrKey(word)||bridgeconnKey(word)||officialKey(word)||includeKey(word)||islrtcKey(word)||islrtcV3Key(word))return;
+    const key=signKeyForManifest(ISL500_MANIFEST,word);
+    if(key)needed.add(ISL500_MANIFEST.signs[key].shard);
+  });
+  await Promise.all([...needed].map(async shard=>{
+    if(ISL500_LOADED_SHARDS.has(shard))return;
+    if(!ISL500_LOADING_SHARDS.has(shard)){
+      const loading=fetchJsonWithTimeout(`signal_dictionary_isl500/${shard}`).then(data=>{
+        Object.entries(data).forEach(([key,frames])=>registerDatasetClip(key,frames));
+        ISL500_LOADED_SHARDS.add(shard);
+      }).catch(error=>{
+        ISL500_LOADING_SHARDS.delete(shard);
+        throw error;
+      });
+      ISL500_LOADING_SHARDS.set(shard,loading);
+    }
+    await ISL500_LOADING_SHARDS.get(shard);
+  }));
+}
+async function loadIsignManifest(){
+  try{return ISIGN_MANIFEST=prepareManifest(await fetchJsonWithTimeout("signal_dictionary_isign/manifest.json"))}
+  catch(error){return null}
+}
+async function ensureIsignSigns(words){
+  if(!ISIGN_MANIFEST)return;
+  const needed=new Set();
+  words.forEach(word=>{
+    if(signFor(word)||cislrKey(word)||bridgeconnKey(word)||officialKey(word)||includeKey(word)||islrtcKey(word)||islrtcV3Key(word))return;
+    const key=isignKey(word);
+    if(key)needed.add(ISIGN_MANIFEST.signs[key].shard);
+  });
+  await Promise.all([...needed].map(async shard=>{
+    if(ISIGN_LOADED_SHARDS.has(shard))return;
+    if(!ISIGN_LOADING_SHARDS.has(shard)){
+      const loading=fetchJsonWithTimeout(`signal_dictionary_isign/${shard}`).then(data=>{
+        Object.entries(data).forEach(([key,frames])=>registerDatasetClip(key,frames));
+        ISIGN_LOADED_SHARDS.add(shard);
+      }).catch(error=>{
+        ISIGN_LOADING_SHARDS.delete(shard);
+        throw error;
+      });
+      ISIGN_LOADING_SHARDS.set(shard,loading);
+    }
+    await ISIGN_LOADING_SHARDS.get(shard);
+  }));
+}
+async function loadKaggleSocialManifest(){
+  try{return KAGGLE_SOCIAL_MANIFEST=prepareManifest(await fetchJsonWithTimeout("signal_dictionary_kaggle_social/manifest.json"))}
+  catch(error){return null}
+}
+async function ensureKaggleSocialSigns(words){
+  if(!KAGGLE_SOCIAL_MANIFEST)return;
+  const needed=new Set();
+  words.forEach(word=>{
+    if(signFor(word)||cislrKey(word)||bridgeconnKey(word)||officialKey(word)||includeKey(word)||islrtcKey(word))return;
+    const key=kaggleSocialKey(word);
+    if(key)needed.add(KAGGLE_SOCIAL_MANIFEST.signs[key].shard);
+  });
+  await Promise.all([...needed].map(async shard=>{
+    if(KAGGLE_SOCIAL_LOADED_SHARDS.has(shard))return;
+    if(!KAGGLE_SOCIAL_LOADING_SHARDS.has(shard)){
+      const loading=fetchJsonWithTimeout(`signal_dictionary_kaggle_social/${shard}`).then(data=>{
+        Object.entries(data).forEach(([key,frames])=>registerDatasetClip(key,frames));
+        KAGGLE_SOCIAL_LOADED_SHARDS.add(shard);
+      }).catch(error=>{
+        KAGGLE_SOCIAL_LOADING_SHARDS.delete(shard);
+        throw error;
+      });
+      KAGGLE_SOCIAL_LOADING_SHARDS.set(shard,loading);
+    }
+    await KAGGLE_SOCIAL_LOADING_SHARDS.get(shard);
+  }));
+}
+function point(frame,index){return new THREE.Vector3(frame[index*3],frame[index*3+1],frame[index*3+2])}
+function collapsedHand(frame,start){
+  const wrist=point(frame,start);
+  let furthest=0;
+  for(let i=1;i<21;i++)furthest=Math.max(furthest,wrist.distanceTo(point(frame,start+i)));
+  return furthest<.0001;
+}
+function repairClip(clip,start){
+  const bad=clip.map(frame=>collapsedHand(frame,start));
+  bad.forEach((isBad,index)=>{
+    if(!isBad)return;
+    let before=index-1,after=index+1;
+    while(before>=0&&bad[before])before--;
+    while(after<clip.length&&bad[after])after++;
+    if(before<0&&after>=clip.length){
+      const wristIndex=start===33?15:16;
+      for(let joint=0;joint<21;joint++)for(let axis=0;axis<3;axis++){
+        clip[index][(start+joint)*3+axis]=clip[index][wristIndex*3+axis];
+      }
+      return;
+    }
+    const source=before>=0?clip[before]:clip[after];
+    for(let joint=0;joint<21;joint++)for(let axis=0;axis<3;axis++){
+      const at=(start+joint)*3+axis;
+      const a=before>=0?clip[before][at]:source[at];
+      const b=after<clip.length?clip[after][at]:source[at];
+      clip[index][at]=before>=0&&after<clip.length?a+(b-a)*(index-before)/(after-before):(before>=0?a:b);
+    }
+  });
+}
+function repairPartialHandPoints(clip,start){
+  // Interpolate isolated missing joints so one bad finger cannot collapse a
+  // complete hand while preserving intentionally collapsed whole-hand frames.
+  for(let joint=1;joint<21;joint++){
+    const bad=clip.map(frame=>{
+      const wrist=point(frame,start),p=point(frame,start+joint);
+      return !Number.isFinite(p.x)||!Number.isFinite(p.y)||!Number.isFinite(p.z)||p.distanceTo(wrist)<1e-5;
+    });
+    if(bad.every(Boolean))continue;
+    bad.forEach((isBad,index)=>{
+      if(!isBad)return;
+      let before=index-1,after=index+1;
+      while(before>=0&&bad[before])before--;
+      while(after<clip.length&&bad[after])after++;
+      const at=(start+joint)*3;
+      if(before>=0&&after<clip.length){
+        const ratio=(index-before)/(after-before);
+        for(let axis=0;axis<3;axis++)clip[index][at+axis]=clip[before][at+axis]+(clip[after][at+axis]-clip[before][at+axis])*ratio;
+      }else if(before>=0){
+        for(let axis=0;axis<3;axis++)clip[index][at+axis]=clip[before][at+axis];
+      }else if(after<clip.length){
+        for(let axis=0;axis<3;axis++)clip[index][at+axis]=clip[after][at+axis];
+      }
+    });
+  }
+}
+function datasetPose(frame){
+  const sl=point(frame,11),sr=point(frame,12);
+  const sm=sl.clone().add(sr).multiplyScalar(.5);
+  const hips=point(frame,23).add(point(frame,24)).multiplyScalar(.5);
+  const x=sr.clone().sub(sl).normalize();
+  const bodyDown=hips.sub(sm);
+  const y=bodyDown.clone().addScaledVector(x,-bodyDown.dot(x)).normalize();
+  const z=new THREE.Vector3().crossVectors(x,y).normalize();
+  const scale=62/Math.max(.001,sl.distanceTo(sr));
+  const mapVector=v=>new THREE.Vector3(v.dot(x)*scale,-v.dot(y)*scale,v.dot(z)*scale);
+  function usableHand(relative){
+    if(relative.length!==21||relative.some(v=>!Number.isFinite(v.x)||!Number.isFinite(v.y)||!Number.isFinite(v.z)))return false;
+    const span=Math.max(...relative.map(v=>v.length()));
+    return span>=1e-5;
+  }
+  function arm(side,shoulderIndex,elbowIndex,wristIndex,handStart){
+    const sourceShoulder=point(frame,shoulderIndex);
+    const shoulder=basePose[side].shoulder.clone();
+    // Dataset depth is camera-relative, so retain its limb directions but use stable avatar bone lengths.
+    const upperDirection=mapVector(point(frame,elbowIndex).sub(sourceShoulder)).normalize();
+    const foreDirection=mapVector(point(frame,wristIndex).sub(point(frame,elbowIndex))).normalize();
+    const elbow=shoulder.clone().addScaledVector(upperDirection,43);
+    const wrist=elbow.clone().addScaledVector(foreDirection,37);
+    const raw=Array.from({length:21},(_,i)=>point(frame,handStart+i));
+    // Hand landmarks and pose landmarks do not necessarily share the same
+    // camera basis. Map the complete palm frame into avatar space first, then
+    // rotate that frame onto the mapped forearm. Applying the rotation in the
+    // MediaPipe space was the source of mirrored palms and detached fingers.
+    const mappedRaw=raw.map(p=>mapVector(p.sub(raw[0])));
+    const handForward=mappedRaw[9].clone();
+    if(handForward.lengthSq()<1e-8||foreDirection.lengthSq()<1e-8)return pose(side,{elbow,wrist});
+    const correction=new THREE.Quaternion().setFromUnitVectors(handForward.normalize(),foreDirection);
+    const mappedRelative=mappedRaw.map(v=>v.applyQuaternion(correction));
+    const forwardAlignment=mappedRelative[9].clone().normalize().dot(foreDirection);
+    if(!Number.isFinite(forwardAlignment)||forwardAlignment<.999)return pose(side,{elbow,wrist});
+    // MediaPipe hands can arrive in a different local scale from the body.
+    // Normalize the corrected cluster to a stable avatar hand span before
+    // anchoring it to the exact synthesized wrist position.
+    const mappedSpan=Math.max(...mappedRelative.map(v=>v.length()));
+    if(!Number.isFinite(mappedSpan)||mappedSpan<1e-5||!usableHand(mappedRelative))return pose(side,{elbow,wrist});
+    const handScale=(62*.45)/mappedSpan;
+    const landmarks=mappedRelative.map(v=>wrist.clone().addScaledVector(v,handScale));
+    landmarks[0].copy(wrist);
+    // Keep the complete hand cluster in the camera-facing signing space. This
+    // is a translation only, so it does not alter the corrected palm frame.
+    const shift=Math.max(0,26-Math.min(wrist.z,...landmarks.map(v=>v.z)));
+    if(shift){wrist.z+=shift;landmarks.forEach(v=>v.z+=shift)}
+    const fallbackNormal=mappedRelative[5].clone().cross(mappedRelative[17]);
+    return {shoulder,elbow,wrist,landmarks,handQ:qFromPalm(foreDirection,fallbackNormal,side),curl:[.14,.14,.14,.14,.14],spread:[.08,.04,0,-.04,-.08]};
+  }
+  return {L:arm("L",11,13,15,33),R:arm("R",12,14,16,54)};
+}
+async function loadDatasetSigns(){
+  try{
+    const [data,demoData]=await Promise.all([
+      fetchJsonWithTimeout("signal_dictionary_reanchored_v2.json"),
+      fetchJsonWithTimeout("signal_dictionary_demo.json").catch(()=>({}))
+    ]);
+    Object.entries({...data,...demoData}).forEach(([name,frames])=>registerDatasetClip(name,frames));
+    status.textContent=`Dataset ready: ${Object.keys(DATASET_LIBRARY).length} landmark signs. Type a dataset word to play it.`;
+  }catch(error){status.textContent="Built-in signs are ready. Dataset clips could not be loaded."}
+}
+// Clips are fetched on demand from /api/clips after /api/resolve has selected
+// an eligible source. Avoid eagerly loading legacy manifests on page open.
+
+let current={L:pose("L"),R:pose("R")};
+// Text-to-pose remains an offline evaluation candidate. It is deliberately
+// disabled in the product surface until it has signer-reviewed held-out
+// results; browser playback must use validated stored clips only.
+const NATIVE_POSE_MODE=false;
+let timeline=[],playStart=0,playing=false,activeToken="",playbackRate=.8;
+const status=document.getElementById("status"),tokensEl=document.getElementById("tokens"),bar=document.getElementById("bar"),currentWord=document.getElementById("currentWord");
+
+function clonePose(p){
+  return {shoulder:p.shoulder.clone(),elbow:p.elbow.clone(),wrist:p.wrist.clone(),handQ:p.handQ.clone(),curl:p.curl.slice(),spread:p.spread.slice(),landmarks:p.landmarks&&p.landmarks.map(v=>v.clone())};
+}
+function mixPose(a,b,t){
+  const mixed={
+    shoulder:a.shoulder.clone().lerp(b.shoulder,t),
+    elbow:a.elbow.clone().lerp(b.elbow,t),
+    wrist:a.wrist.clone().lerp(b.wrist,t),
+    handQ:a.handQ.clone().slerp(b.handQ,t),
+    curl:a.curl.map((v,i)=>v+(b.curl[i]-v)*t),
+    spread:a.spread.map((v,i)=>v+(b.spread[i]-v)*t)
+  };
+  if(a.landmarks&&b.landmarks)mixed.landmarks=a.landmarks.map((v,i)=>v.clone().lerp(b.landmarks[i],t));
+  return mixed;
+}
+function smoothstep(t){return t*t*(3-2*t)}
+function collapseKnownSignPhrases(items){
+  const raw=items.flatMap(item=>String(item||"").toLowerCase().replace(/[^a-z0-9\s]/g," ").split(/\s+/).filter(Boolean));
+  const out=[];
+  for(let i=0;i<raw.length;i++){
+    let match="",matchLength=0;
+    for(let length=Math.min(5,raw.length-i);length>0;length--){
+      const candidate=raw.slice(i,i+length).join(" ");
+      if(hasSign(candidate)){match=candidate;matchLength=length;break}
+    }
+    if(match){out.push(match);i+=matchLength-1;continue}
+    out.push(raw[i]);
+  }
+  return out;
+}
+function tokenize(text){
+  const spoken=text.trim().toLowerCase().replace(/[!?.,]/g,"").replace(/\s+/g," ");
+  const matchingPhrase=Object.keys(DEMO_PHRASEBOOK).sort((a,b)=>b.length-a.length).find(phrase=>spoken.includes(phrase));
+  // Only consume a curated phrase when it is the complete utterance. This
+  // prevents a sentence such as "hello everyone please help" from silently
+  // dropping everything after the first phrase match.
+  if(matchingPhrase&&spoken===matchingPhrase)return DEMO_PHRASEBOOK[matchingPhrase];
+  // For regional-language speech, recover every known phrase in a longer
+  // utterance in source order instead of discarding the whole non-Latin line.
+  if(/[^\x00-\x7F]/.test(spoken)){
+    const matches=Object.keys(DEMO_PHRASEBOOK).map(phrase=>({phrase,index:spoken.indexOf(phrase)}))
+      .filter(item=>item.index>=0).sort((a,b)=>a.index-b.index||b.phrase.length-a.phrase.length);
+    const recovered=[];
+    let end=-1;
+    matches.forEach(item=>{
+      if(item.index<end)return;
+      recovered.push(...DEMO_PHRASEBOOK[item.phrase]);
+      end=item.index+item.phrase.length;
+    });
+    if(recovered.length)return recovered;
+  }
+  return collapseKnownSignPhrases([text]);
+}
+function buildTimeline(words){
+  const frames=[];
+  let time=0;
+  words.forEach(word=>{
+    const sign=signFor(word);
+    if(!sign)return;
+    const spelling=Boolean(sign[0]&&sign[0].letter);
+    const duration=spelling?Math.max(500,Math.round(sign.length/3)*500):1300;
+    sign.forEach((kf,idx)=>{
+      const clipPose=kf.dataset?datasetPose(kf.dataset):{L:kf.L,R:kf.R};
+      const authoredExpression=kf.expression&&kf.expression!=="neutral"?kf.expression:null;
+      frames.push({time:time+kf.t*duration,word,expression:authoredExpression||WORD_EXPRESSIONS[word]||"neutral",pose:{L:clonePose(clipPose.L),R:clonePose(clipPose.R)}});
+      if(idx===sign.length-1) time+=duration+(spelling?100:150);
+    });
+    // Keep the last signed pose as the transition source. Resetting both
+    // hands to neutral between every word creates visible breaks and floating
+    // wrists; the existing inter-sign gap now bridges directly to the next sign.
+  });
+  return frames;
+}
+function buildNativePoseTimeline(rawFrames,label){
+  const frames=[];
+  const usable=rawFrames.filter(frame=>Array.isArray(frame)&&frame.length===225);
+  usable.forEach((dataset,index)=>{
+    const clipPose=datasetPose(dataset);
+    frames.push({time:usable.length<2?0:index/(usable.length-1)*2200,word:label,expression:"neutral",pose:{L:clonePose(clipPose.L),R:clonePose(clipPose.R)}});
+  });
+  return frames;
+}
+function renderTokens(words){
+  tokensEl.innerHTML="";
+  words.forEach(w=>{
+    const span=document.createElement("span");
+    span.className="pill "+(signFor(w)?"":canRenderWord(w)?"fallback":"missing");
+    span.textContent=w;
+    span.dataset.word=w;
+    tokensEl.appendChild(span);
+  });
+}
+let playbackRequest=0;
+const LOCAL_INFERENCE_URL=["127.0.0.1","localhost"].includes(location.hostname)?"http://127.0.0.1:8090":null;
+let staticRuntimePromise=null;
+let quickStartRuntimePromise=null;
+let quickStartRuntime=null;
+let bootstrapRuntimePromise=null;
+let bootstrapRuntime=null;
+const STATIC_OMISSIONS=new Set(["a","an","the","am","is","are","was","were","be","to","of"]);
+const STATIC_ALIASES={observe:"OBSERVE_WATCH",began:"BEGAN_BEGUN",let:"ALLOW_LET"};
+const STATIC_GREETING={hai:"hello",hi:"hello",hii:"hello",helo:"hello",helloo:"hello"};
+const STATIC_COMPACT={
+  im:"i am",youre:"you are",theyre:"they are",hes:"he is",shes:"she is",its:"it is",thats:"that is",
+  cant:"can not",dont:"do not",doesnt:"does not",didnt:"did not",isnt:"is not",arent:"are not",
+  wasnt:"was not",werent:"were not",wont:"will not",wouldnt:"would not",shouldnt:"should not",
+  couldnt:"could not",havent:"have not",hasnt:"has not",hadnt:"had not",ill:"i will",youll:"you will",
+  theyll:"they will",lets:"let us",ar:"are", "can t":"can not", "don t":"do not", "i m":"i am", "you re":"you are",
+  "we re":"we are", "they re":"they are", "he s":"he is", "she s":"she is", "it s":"it is", "that s":"that is"
+};
+const STATIC_CONTRACTIONS={
+  "i'm":"i am","you're":"you are","we're":"we are","they're":"they are","he's":"he is","she's":"she is","it's":"it is","that's":"that is",
+  "can't":"can not","don't":"do not","doesn't":"does not","didn't":"did not","isn't":"is not","aren't":"are not","wasn't":"was not","weren't":"were not",
+  "won't":"will not","wouldn't":"would not","shouldn't":"should not","couldn't":"could not","haven't":"have not","hasn't":"has not","hadn't":"had not",
+  "i'll":"i will","you'll":"you will","we'll":"we will","they'll":"they will","let's":"let us"
+};
+function staticCanonical(value){return String(value||"").toUpperCase().replace(/[^A-Z0-9]+/g,"_").replace(/^_+|_+$/g,"")}
+function staticNormalize(text){
+  let value=String(text||"").toLowerCase().replace(/’/g,"'");
+  for(const [from,to] of Object.entries(STATIC_CONTRACTIONS))value=value.replace(new RegExp(`(^|[^a-z])${from.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")}(?![a-z])`,"g"),(_,prefix)=>`${prefix}${to}`);
+  for(const [from,to] of Object.entries(STATIC_COMPACT))value=value.replace(new RegExp(`(^|[^a-z])${from.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")}(?![a-z])`,"g"),(_,prefix)=>`${prefix}${to}`);
+  const words=(value.match(/[a-z0-9]+/g)||[]);
+  if(words.length&&STATIC_GREETING[words[0]])words[0]="hello";
+  if(words.length>1&&words[0]==="hello"&&["all","everyone"].includes(words[1]))words[1]="everyone";
+  for(let i=0;i<words.length;i++)if(words[i]==="guys")words[i]="everyone";
+  return words;
+}
+function staticCandidates(value){
+  value=String(value||"").toLowerCase(); const forms=[value];
+  if(value.endsWith("ies")&&value.length>3)forms.push(value.slice(0,-3)+"y");
+  if(value.endsWith("ing")&&value.length>5)forms.push(value.slice(0,-3),value.slice(0,-3)+"e");
+  if(value.endsWith("ed")&&value.length>4)forms.push(value.slice(0,-2),value.slice(0,-1));
+  if(value.endsWith("es")&&value.length>4)forms.push(value.slice(0,-2));
+  if(value.endsWith("s")&&value.length>3)forms.push(value.slice(0,-1));
+  const keys=[...new Set(forms.map(staticCanonical).filter(Boolean))];
+  if(STATIC_ALIASES[value]&&!keys.includes(STATIC_ALIASES[value]))keys.push(STATIC_ALIASES[value]);
+  return keys;
+}
+function staticValidClip(value){return Array.isArray(value)&&value.length===30&&value.every(frame=>Array.isArray(frame)&&frame.length===225&&frame.every(Number.isFinite));}
+function staticTakeScore(sequence){return sequence.reduce((score,frame)=>score+((frame.slice(99,225).some((value,index)=>Math.abs(value-frame[99+(index%3)])>1e-6))?1:0),0);}
+function staticSelectedClip(value){
+  if(staticValidClip(value))return value;
+  if(!Array.isArray(value))return null;
+  return value.filter(staticValidClip).sort((a,b)=>staticTakeScore(b)-staticTakeScore(a))[0]||null;
+}
+async function loadStaticRuntime(){
+  if(!RUNTIME_BASE)throw new Error("static runtime is not configured");
+  if(!staticRuntimePromise){
+    // The deployed Space serves this compact index from its own origin. That
+    // avoids a redirect before the first lookup; pose shards stay remote and
+    // lazy-loaded because they are much larger.
+    staticRuntimePromise=fetch(RUNTIME_INDEX_URL||`${RUNTIME_BASE}/runtime_index.json`,{signal:AbortSignal.timeout(45000)}).then(response=>{
+      if(!response.ok)throw new Error(`runtime index returned ${response.status}`); return response.json();
+    });
+  }
+  return staticRuntimePromise;
+}
+function registerRuntimePayload(payload){
+  for(const item of payload?.clips||[])registerDatasetClip(item.gloss,item.clip);
+  return payload;
+}
+async function loadBootstrapRuntime(){
+  if(!RUNTIME_BASE)return null;
+  if(!bootstrapRuntimePromise){
+    bootstrapRuntimePromise=fetch(BOOTSTRAP_URL||`${RUNTIME_BASE}/runtime_bootstrap.json`,{signal:AbortSignal.timeout(90000)}).then(response=>{
+      if(!response.ok)throw new Error(`bootstrap cache returned ${response.status}`);
+      return response.json();
+    }).then(payload=>{
+      bootstrapRuntime=registerRuntimePayload(payload);
+      return bootstrapRuntime;
+    });
+  }
+  return bootstrapRuntimePromise;
+}
+async function loadQuickStartRuntime(){
+  if(!RUNTIME_BASE)return null;
+  if(!quickStartRuntimePromise){
+    quickStartRuntimePromise=fetch(`${RUNTIME_BASE}/runtime_quickstart.json`,{signal:AbortSignal.timeout(90000)}).then(response=>{
+      if(!response.ok)throw new Error(`quick-start cache returned ${response.status}`);
+      return response.json();
+    }).then(payload=>{
+      quickStartRuntime=registerRuntimePayload(payload);
+      return quickStartRuntime;
+    });
+  }
+  return quickStartRuntimePromise;
+}
+function warmStaticRuntime(){
+  // Bootstrap only the phone-friendly core before the first interaction. The
+  // larger demo cache is intentionally deferred so it cannot block a tap.
+  if(!RUNTIME_BASE)return;
+  loadBootstrapRuntime().catch(()=>null);
+  setTimeout(()=>loadQuickStartRuntime().catch(()=>null),1200);
+}
+async function resolveStaticRuntime(text,language){
+  // The core cache includes high-frequency signs whose original source shard
+  // may be hundreds of megabytes. Wait for it here instead of making the
+  // first meeting request race a very large shard download.
+  // Resolve against the core cache immediately. The full 11k-entry index is
+  // embedded there, so a mobile visitor does not need a second request before
+  // common signs can begin. The demo cache upgrades available clips as soon
+  // as it finishes in the background.
+  const runtime=await loadBootstrapRuntime();
+  if(!runtime?.index)throw new Error("bootstrap cache could not be reached");
+  const source=String(text||"").trim().replace(/\s+/g," ");
+  const english=language==="en-IN"?source:(runtime.reviewed_phrases?.[language]?.[source]||null);
+  if(!english)return {words:[],missing:[],translationAvailable:false,sourceLanguage:document.querySelector(`#speechLanguage option[value="${language}"]`)?.textContent||"Selected language"};
+  const rawTokens=(english.toLowerCase().replace(/’/g,"'").match(/[a-z0-9]+/g)||[]);
+  const exact=staticCanonical(rawTokens.join(" "));
+  let records=[]; let missing=[];
+  if(rawTokens.length>1&&runtime.index[exact])records=[{...runtime.index[exact],key:exact}];
+  else {
+    const tokens=staticNormalize(english); let position=0;
+    while(position<tokens.length){
+      let found=null, width=0;
+      for(let count=Math.min(16,tokens.length-position);count>0&&!found;count--){
+        const phrase=tokens.slice(position,position+count).join(" ");
+        if(count===1&&STATIC_OMISSIONS.has(phrase))continue;
+        for(const key of staticCandidates(phrase)){if(runtime.index[key]){found=key;width=count;break}}
+      }
+      if(found){records.push({...runtime.index[found],key:found});position+=width;}
+      else {if(!STATIC_OMISSIONS.has(tokens[position]))missing.push(tokens[position]);position++;}
+    }
+  }
+  const files=new Map();
+  // A bundled or procedural validated clip can begin immediately. Only ask
+  // the public runtime for a shard if that particular sign is not ready yet.
+  for(const record of records){
+    if(signFor(record.gloss))continue;
+    const path=`${record.directory}/${record.shard}`;
+    if(!files.has(path))files.set(path,fetch(`${RUNTIME_BASE}/${path}`,{signal:AbortSignal.timeout(20000)}).then(response=>response.ok?response.json():null));
+  }
+  const shards=new Map(); for(const [path,promise] of files)shards.set(path,await promise);
+  const words=[];
+  for(const record of records){
+    if(signFor(record.gloss)){words.push(record.gloss);continue;}
+    const raw=shards.get(`${record.directory}/${record.shard}`)?.[record.raw_key]; const clip=staticSelectedClip(raw);
+    if(!clip)missing.push(record.gloss); else {registerDatasetClip(record.gloss,clip);words.push(record.gloss);}
+  }
+  return {words,missing:[...new Set(missing)],translationAvailable:true,english,recordedSentence:records.length===1&&records[0].source==="islrtc_sentences"};
+}
+async function resolveProductDictionary(text,language){
+  if(RUNTIME_BASE){try{return await resolveStaticRuntime(text,language)}catch(error){return {error:"static runtime could not be reached"}}}
+  try{
+    const response=await fetch(apiUrl("/api/resolve"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text,language}),signal:AbortSignal.timeout(5000)});
+    if(!response.ok)return {error:`lookup service returned ${response.status}`};
+    const data=await response.json();
+    if(!Array.isArray(data.resolved))return null;
+    if(data.translation_available===false)return {words:[],missing:[],translationAvailable:false,sourceLanguage:data.source_language||"Selected language"};
+    const keys=data.resolved.map(item=>item.key).filter(Boolean);
+    if(!keys.length)return {words:[],missing:data.missing||[],translationAvailable:true,english:data.english,recordedSentence:false};
+    const clipsResponse=await fetch(apiUrl("/api/clips"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({keys}),signal:AbortSignal.timeout(8000)});
+    if(!clipsResponse.ok)return null;
+    const clips=await clipsResponse.json();
+    Object.entries(clips.clips||{}).forEach(([label,raw])=>registerDatasetClip(label,raw));
+    return {words:data.resolved.map(item=>item.gloss),missing:[...(data.missing||[]),...(clips.missing||[])],translationAvailable:true,english:data.english,recordedSentence:data.recorded_sentence===true};
+  }catch(error){return {error:"lookup service could not be reached"}}
+}
+async function sentenceModelWords(text,language="en-IN"){
+  const spoken=text.trim().toLowerCase().replace(/[!?.,]/g,"").replace(/\s+/g," ");
+  // Reviewed meeting phrases are safer than generic model decoding. Keep
+  // their ISL gloss order. Regional phrases still go through the local API so
+  // the translated English text is visible to the meeting participant.
+  const reviewedGloss=Object.prototype.hasOwnProperty.call(DEMO_PHRASEBOOK,spoken)?DEMO_PHRASEBOOK[spoken]:null;
+  if(language==="en-IN"&&reviewedGloss)return reviewedGloss;
+  if(!LOCAL_INFERENCE_URL)return reviewedGloss;
+  try{
+    const regional=language!=="en-IN";
+    const response=await fetch(`${LOCAL_INFERENCE_URL}/${regional?"predict_regional":"predict"}`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(regional?{text,language}:{text}),signal:AbortSignal.timeout(regional?15000:1800)
+    });
+    if(!response.ok)return reviewedGloss;
+    const data=await response.json();
+    if(regional&&data.english)status.textContent=`${data.source_language_name||"Regional"} -> English: ${data.english}`;
+    return Array.isArray(data.words)&&data.words.length?data.words:reviewedGloss;
+  }catch(error){
+    return reviewedGloss;
+  }
+}
+async function nativePoseFrames(text){
+  // The current text-to-pose checkpoint was trained with English transcript
+  // tokens. Regional-language text stays on the reviewed multilingual path.
+  if(/[^\x00-\x7F]/.test(text))return null;
+  try{
+    const response=await fetch("http://127.0.0.1:8090/predict_pose",{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({text}),signal:AbortSignal.timeout(5000)
+    });
+    if(!response.ok)return null;
+    const data=await response.json();
+    if(!data.native_pose_supervision||!Array.isArray(data.pose)||data.pose.length!==30)return null;
+    return data.pose;
+  }catch(error){return null}
+}
+async function playText(text,language=document.getElementById("speechLanguage").value){
+  const request=++playbackRequest;
+  status.textContent="Preparing ISL signs...";
+  const productLookup=await resolveProductDictionary(text,language);
+  // The product route is server-backed. It serves one quality-prioritized,
+  // eligibility-filtered clip per sign. Do not fall through to legacy browser
+  // manifests, which can reintroduce clips rejected by quality validation.
+  if(!productLookup||productLookup.error){
+    tokensEl.innerHTML='<span class="pill missing">validated lookup unavailable</span>';
+    timeline=[]; playing=false; activeToken=""; bar.style.width="0"; currentWord.textContent="idle";
+    status.textContent=API_BASE?"The configured ISL API is unavailable; no substitute gesture was played.":RUNTIME_BASE?"The configured static ISL runtime is unavailable; no substitute gesture was played.":"This build needs its ISL API. Open it at http://127.0.0.1:8080/isl-avatar-prototype.html; no substitute gesture was played.";
+    return;
+  }
+  const words=productLookup.words;
+  const unavailable=[...new Set(productLookup.missing||[])];
+  // A partial sequence can change the user's meaning. If any content token
+  // lacks a validated clip, show the gap and keep the avatar still rather
+  // than signing the surrounding words as though the request were complete.
+  if(unavailable.length){
+    tokensEl.innerHTML=`<span class="pill missing">unable to render: ${unavailable.join(", ")}</span>`;
+    timeline=[]; playing=false; activeToken=""; bar.style.width="0"; currentWord.textContent="idle";
+    status.textContent=`No complete validated ISL sequence for this utterance. Missing: ${unavailable.join(", ")}.`;
+    return;
+  }
+  if(NATIVE_POSE_MODE){
+    const nativeFrames=await nativePoseFrames(text);
+    if(nativeFrames){
+      if(request!==playbackRequest)return;
+      timeline=buildNativePoseTimeline(nativeFrames,text.trim().toLowerCase()||"native pose");
+      renderTokens([text.trim().toLowerCase()||"native pose"]);
+      if(timeline.length){
+        playStart=performance.now(); playing=true;
+        status.textContent=`Native iSign pose candidate: ${timeline.length} frames from 120311 validated clips.`;
+        return;
+      }
+    }
+    status.textContent="Native pose candidate unavailable; using validated word signs.";
+  }
+  if(request!==playbackRequest)return;
+  if(!words.length){
+    tokensEl.innerHTML='<span class="pill missing">translation pending</span>';
+    timeline=[]; playing=false; activeToken=""; bar.style.width="0"; currentWord.textContent="idle";
+    status.textContent=productLookup&&productLookup.translationAvailable===false?`${productLookup.sourceLanguage} input is not in the reviewed translation set yet.`:"No validated ISL translation for this utterance yet.";
+    return;
+  }
+  renderTokens(words);
+  timeline=buildTimeline(words);
+  if(!timeline.length){status.textContent="No stored sign is available for this phrase yet.";return}
+  playStart=performance.now();
+  playing=true;
+  const missing=[...new Set(words.filter(word=>!canRenderWord(word)))];
+  const coverage=missing.length?` Unable to render: ${missing.join(", ")}.`:" Validated clip coverage.";
+  const playbackKind=productLookup.recordedSentence?"Recorded sentence sequence":"Validated server dictionary";
+  status.textContent=`${playbackKind}: ${timeline.filter(f=>f.word).map(f=>f.word).filter((w,i,a)=>w&&a.indexOf(w)===i).length} sign(s).${coverage}`;
+}
+function setPlaybackRate(value){
+  const next=Math.max(.25,Math.min(2.5,Number(value)||1));
+  if(playing){
+    const elapsed=(performance.now()-playStart)*playbackRate;
+    playStart=performance.now()-elapsed/next;
+  }
+  playbackRate=next;
+  document.getElementById("speedValue").textContent=next.toFixed(2)+"x";
+}
+function sampleTimeline(now){
+  if(!playing||timeline.length<1){applyExpression("neutral");return {L:pose("L"),R:pose("R")}}
+  const t=(now-playStart)*playbackRate;
+  const total=timeline[timeline.length-1].time;
+  if(t>=total){playing=false;activeToken="";bar.style.width="0";currentWord.textContent="idle";applyExpression("neutral");return {L:pose("L"),R:pose("R")}}
+  let i=0;
+  while(i<timeline.length-2&&timeline[i+1].time<t)i++;
+  const a=timeline[i],b=timeline[i+1];
+  const u=smoothstep((t-a.time)/Math.max(1,b.time-a.time));
+  activeToken=a.word||b.word||"";
+  bar.style.width=Math.min(100,t/total*100).toFixed(1)+"%";
+  currentWord.textContent=activeToken||"transition";
+  [...tokensEl.children].forEach(el=>el.classList.toggle("active",el.dataset.word===activeToken));
+  applyExpression(u<.5?a.expression:b.expression,u<.5?1-u*2:(u-.5)*2);
+  return {L:mixPose(a.pose.L,b.pose.L,u),R:mixPose(a.pose.R,b.pose.R,u)};
+}
+
+function drawDebug(p){
+  const points=[p.L.shoulder,p.L.elbow,p.L.wrist,p.R.shoulder,p.R.elbow,p.R.wrist];
+  const pairs=[[0,1],[1,2],[3,4],[4,5]];
+  pairs.forEach(([a,b],i)=>debugLines[i].geometry.setFromPoints([points[a],points[b]]));
+  const chains=[[0,1,2,3,4],[0,5,6,7,8],[0,9,10,11,12],[0,13,14,15,16],[0,17,18,19,20]];
+  let lineIndex=4,pointIndex=0;
+  [p.L.landmarks,p.R.landmarks].forEach(hand=>{
+    if(!hand)return;
+    hand.forEach(v=>{debugPointPositions[pointIndex++*3]=v.x;debugPointPositions[(pointIndex-1)*3+1]=v.y;debugPointPositions[(pointIndex-1)*3+2]=v.z});
+    chains.forEach(chain=>chain.slice(0,-1).forEach((joint,i)=>debugLines[lineIndex++].geometry.setFromPoints([hand[chain[i]],hand[chain[i+1]]])));
+  });
+  debugDots.geometry.setDrawRange(0,pointIndex);
+  debugDots.geometry.attributes.position.needsUpdate=true;
+  if(debugGroup.visible){
+    const handReport=side=>{
+      const hand=p[side].landmarks;
+      if(!hand)return `${side} hand procedural`;
+      const span=Math.max(...hand.map(v=>v.distanceTo(hand[0])));
+      const wristGap=hand[0].distanceTo(p[side].wrist);
+      return `${side} hand ${span.toFixed(1)} / gap ${wristGap.toFixed(2)}`;
+    };
+    status.textContent=`Rig lengths: L ${p.L.shoulder.distanceTo(p.L.elbow).toFixed(1)} / ${p.L.elbow.distanceTo(p.L.wrist).toFixed(1)}, R ${p.R.shoulder.distanceTo(p.R.elbow).toFixed(1)} / ${p.R.elbow.distanceTo(p.R.wrist).toFixed(1)}. ${handReport("L")}; ${handReport("R")}.`;
+  }
+}
+function frame(now){
+  requestAnimationFrame(frame);
+  controls.update();
+  current=sampleTimeline(now);
+  arms.L.setPose(current.L);
+  arms.R.setPose(current.R);
+  setRealAvatarPose(current);
+  updateFormalOutfit(realisticAvatar);
+  drawDebug(current);
+  renderer.render(scene,camera);
+}
+requestAnimationFrame(frame);
+loadRealAvatar();
+warmStaticRuntime();
+
+document.getElementById("playBtn").addEventListener("click",()=>playText(document.getElementById("sentence").value,document.getElementById("speechLanguage").value));
+document.getElementById("speedControl").addEventListener("input",e=>setPlaybackRate(e.target.value));
+document.getElementById("frontBtn").addEventListener("click",()=>{camera.position.set(0,112,345);controls.target.set(0,78,0);controls.update()});
+document.getElementById("sideBtn").addEventListener("click",()=>{camera.position.set(260,105,70);controls.target.set(0,78,0);controls.update()});
+document.getElementById("debugBtn").addEventListener("click",e=>{debugGroup.visible=!debugGroup.visible;e.target.textContent=debugGroup.visible?"Debug on":"Debug"});
+let activeRecognition=null;
+let lastSpeechPreview="";
+let micStream=null;
+let speechTranscript="";
+let speechPermissionPromise=null;
+let pendingSpeechText="";
+let speechSignTimer=null;
+const sentenceInput=document.getElementById("sentence");
+const speechButton=document.getElementById("speechBtn");
+function releaseMicStream(){
+  if(speechSignTimer)clearTimeout(speechSignTimer);
+  speechSignTimer=null;
+  pendingSpeechText="";
+  micStream?.getTracks().forEach(track=>track.stop());
+  micStream=null;
+  speechPermissionPromise=null;
+}
+async function ensureMicPermission(){
+  if(micStream?.getAudioTracks().some(track=>track.readyState==="live"))return true;
+  if(!navigator.mediaDevices?.getUserMedia)return true;
+  if(!speechPermissionPromise){
+    status.textContent="Requesting microphone permission...";
+    speechPermissionPromise=navigator.mediaDevices.getUserMedia({audio:true}).then(stream=>{
+      micStream=stream;
+      try{localStorage.setItem("islMicPermissionGranted","1")}catch(error){}
+      return true;
+    }).catch(error=>{
+      speechPermissionPromise=null;
+      const message=error.name==="NotAllowedError"
+        ?"Microphone permission is blocked. Allow it once for localhost, then press Mic again."
+        :error.name==="NotFoundError"
+          ?"No microphone was detected. Check the selected input device."
+          :"Microphone permission could not be confirmed. Check browser settings.";
+      status.textContent=message;
+      return false;
+    });
+  }
+  return speechPermissionPromise;
+}
+document.getElementById("speechBtn").addEventListener("click",()=>{
+  if(activeRecognition){
+    activeRecognition.__stopRequested=true;
+    if(activeRecognition.__restartTimer)clearTimeout(activeRecognition.__restartTimer);
+    try{activeRecognition.stop()}catch(error){}
+    activeRecognition=null;
+    speechButton.textContent="Mic";
+    sentenceInput.readOnly=false;
+    status.textContent="Mic stopped.";
+    return;
+  }
+  const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SpeechRecognition){status.textContent="Speech recognition is not available in this browser.";return}
+  if(!window.isSecureContext&&!/[.]?localhost$|^127[.]0[.]0[.]1$/.test(location.hostname)){
+    status.textContent="Mic requires HTTPS or localhost.";
+    return;
+  }
+  const rec=new SpeechRecognition();
+  rec.lang=document.getElementById("speechLanguage").value;
+  rec.continuous=true;
+  rec.interimResults=true;
+  let finalText="";
+  activeRecognition=rec;
+  lastSpeechPreview="";
+  speechTranscript="";
+  pendingSpeechText="";
+  sentenceInput.readOnly=true;
+  const resetMic=message=>{
+    if(rec.__restartTimer)clearTimeout(rec.__restartTimer);
+    if(speechSignTimer)clearTimeout(speechSignTimer);
+    speechSignTimer=null;
+    pendingSpeechText="";
+    if(activeRecognition===rec)activeRecognition=null;
+    speechButton.textContent="Mic";
+    sentenceInput.readOnly=false;
+    if(message)status.textContent=message;
+  };
+  const scheduleSpeechSigning=()=>{
+    if(speechSignTimer)clearTimeout(speechSignTimer);
+    speechSignTimer=setTimeout(()=>{
+      speechSignTimer=null;
+      const utterance=pendingSpeechText.trim().replace(/\s+/g," ");
+      pendingSpeechText="";
+      if(!utterance||utterance===lastSpeechPreview||activeRecognition!==rec)return;
+      lastSpeechPreview=utterance;
+      playText(utterance,rec.lang);
+    },650);
+  };
+  const restart=()=>{
+    if(rec.__stopRequested||activeRecognition!==rec)return;
+    rec.__restartTimer=setTimeout(()=>{
+      if(rec.__stopRequested||activeRecognition!==rec)return;
+      try{rec.start();status.textContent="Listening..."}
+      catch(error){rec.__restartTimer=setTimeout(restart,500)}
+    },180);
+  };
+  speechButton.textContent="Stop mic";
+  rec.onstart=()=>{status.textContent="Listening..."};
+  rec.onresult=e=>{
+    let interimText="";
+    let completed="";
+    for(let i=e.resultIndex;i<e.results.length;i++){
+      const transcript=e.results[i][0].transcript;
+      if(e.results[i].isFinal){
+        finalText+=transcript+" ";
+        completed+=transcript+" ";
+      }
+      else interimText+=transcript;
+    }
+    const liveText=(speechTranscript+finalText+interimText).trim();
+    sentenceInput.value=liveText;
+    if(completed.trim()){
+      const utterance=completed.trim();
+      speechTranscript=(speechTranscript+" "+utterance).trim();
+      finalText="";
+      sentenceInput.value=speechTranscript;
+      pendingSpeechText=(pendingSpeechText+" "+utterance).trim();
+      scheduleSpeechSigning();
+    }
+  };
+  rec.onerror=e=>{
+    if(rec.__stopRequested)return;
+    const messages={
+      "not-allowed":"Mic permission is blocked. Allow microphone access for localhost and try again.",
+      "service-not-allowed":"Browser speech service is blocked. Check Chrome microphone and speech permissions.",
+      "audio-capture":"No microphone was detected. Check the selected input device.",
+      "network":"Speech service temporarily unavailable; retrying while listening...",
+      "language-not-supported":"This speech language is not supported by the browser.",
+      "no-speech":"No speech detected; listening again..."
+    };
+    if(e.error==="not-allowed"||e.error==="service-not-allowed"||e.error==="audio-capture"||e.error==="language-not-supported"){
+      resetMic(messages[e.error]);
+      return;
+    }
+    status.textContent=messages[e.error]||`Mic error: ${e.error}. Listening again...`;
+  };
+  rec.onend=()=>{
+    if(activeRecognition!==rec)return;
+    if(rec.__stopRequested){resetMic("Mic stopped.");return}
+    restart();
+  };
+  ensureMicPermission().then(allowed=>{
+    if(!allowed||activeRecognition!==rec){if(activeRecognition!==rec)releaseMicStream();return}
+    try{rec.start();status.textContent="Listening..."}
+    catch(error){resetMic("Mic could not start. Check browser permission and microphone settings.")}
+  });
+});
+window.addEventListener("beforeunload",releaseMicStream);
+window.addEventListener("resize",()=>{
+  camera.aspect=stage.clientWidth/stage.clientHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(stage.clientWidth,stage.clientHeight);
+});
+status.textContent="Ready. Enter text or use the microphone to request validated ISL signs.";
+window.__islDebug=()=>({
+  current:{L:clonePose(current.L),R:clonePose(current.R)},
+  handGroups:{L:arms.L.hand.group.getWorldPosition(new THREE.Vector3()),R:arms.R.hand.group.getWorldPosition(new THREE.Vector3())}
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Speech → ISL Avatar (Phase 1 Demo)</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+  :root { --bg:#0d1b1e; --panel:#12262b; --ink:#eaf2f0; --muted:#8fa8a4; --accent:#f2a541; --ok:#4fb286; --miss:#d9694f; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; padding:20px 16px 40px; }
+  .wrap { max-width:760px; margin:0 auto; }
+  h1 { font-size:1.3rem; margin:0 0 4px; }
+  .sub { color:var(--muted); font-size:0.88rem; margin-bottom:16px; }
+  .panel { background:var(--panel); border-radius:10px; padding:14px 16px; margin-bottom:14px; }
+  label { font-size:0.8rem; color:var(--muted); }
+  input[type="file"], input[type="text"] { background:#1c3a38; color:var(--ink); border:none; border-radius:6px; padding:9px 10px; font:inherit; }
+  input[type="text"] { width:100%; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  button { font:inherit; font-weight:600; border:none; border-radius:8px; padding:10px 18px; cursor:pointer; background:var(--accent); color:#1a1206; }
+  button:active { transform:scale(0.97); }
+  button.listening { background:var(--miss); color:#fff; }
+  button:disabled { background:#33403f; color:var(--muted); cursor:not-allowed; }
+  #canvasHolder { width:100%; height:420px; border-radius:10px; overflow:hidden; background:#0a1618; border:1px solid #1c3a38; }
+  .status { font-size:0.8rem; color:var(--muted); margin-top:8px; }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+  .chip { padding:5px 11px; border-radius:999px; font-size:0.82rem; font-weight:600; background:#1c3a38; }
+  .chip.matched { background:var(--ok); color:#06231a; }
+  .chip.playing { background:var(--accent); color:#1a1206; outline:2px solid #fff; }
+  .chip.unmatched { background:#3a2420; color:var(--miss); border:1px solid var(--miss); }
+  .note { font-size:0.78rem; color:var(--muted); border-top:1px solid #1c3a38; padding-top:12px; margin-top:18px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Speech → ISL Avatar</h1>
+  <div class="sub">Speak or type. Matched words play on the avatar in sequence. Phase 1 demo — fixed vocabulary, skeleton avatar.</div>
+
+  <div class="panel">
+    <label>Load signal_dictionary_smoothed.json</label><br>
+    <input type="file" id="fileInput" accept=".json">
+    <div class="status" id="dictStatus">Load your dictionary first.</div>
+  </div>
+
+  <div class="panel">
+    <div class="row">
+      <button id="micBtn" disabled>🎤 Speak</button>
+      <span style="color:var(--muted)">or</span>
+      <input type="text" id="textInput" placeholder="type words e.g. hello please help water" style="flex:1;min-width:180px;">
+      <button id="goBtn" disabled>Sign it</button>
+    </div>
+    <div class="status" id="status"></div>
+    <div class="chips" id="chips"></div>
+  </div>
+
+  <div id="canvasHolder"></div>
+
+  <div class="note">
+    Words in your dictionary turn green and play; unknown words turn red and are skipped. Matching is exact word-to-sign lookup
+    (no grammar reordering yet — that's a later phase). Sign correctness needs review by a fluent ISL signer.
+  </div>
+</div>
+
+<script>
+const POSE_COUNT=33, HAND_COUNT=21, NUM_POINTS=POSE_COUNT+2*HAND_COUNT;
+const POSE_CONNECTIONS=[[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28],[0,11],[0,12]];
+const HAND_CONNECTIONS=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+
+let dictionary=null;
+
+// ---- word normalization: map spoken words to dictionary folder names ----
+// Dictionary keys are folder names like "HELLO_HI", "DON'T CARE", "TAKE CARE".
+// Build a lookup from simplified spoken form -> real key.
+let lookupMap={};
+function buildLookup(){
+  lookupMap={};
+  for(const key of Object.keys(dictionary)){
+    // split multi-word/aliased keys: "HELLO_HI" -> hello, hi ; "TAKE CARE" -> take care (phrase)
+    const simplified=key.toLowerCase();
+    lookupMap[simplified]=key;                 // full phrase form
+    simplified.split(/[_,\s]+/).forEach(part=>{ // individual alias words
+      if(part && !(part in lookupMap)) lookupMap[part]=key;
+    });
+  }
+}
+function matchWord(token){
+  return lookupMap[token] || null;
+}
+
+// ---- Three.js skeleton ----
+const holder=document.getElementById("canvasHolder");
+const scene=new THREE.Scene();
+const camera=new THREE.PerspectiveCamera(45, holder.clientWidth/holder.clientHeight,0.1,100);
+camera.position.set(0,0,3.2);
+const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
+renderer.setSize(holder.clientWidth,holder.clientHeight);
+holder.appendChild(renderer.domElement);
+scene.add(new THREE.AmbientLight(0xaacccc,0.8));
+const pl=new THREE.PointLight(0xffffff,0.9); pl.position.set(2,2,3); scene.add(pl);
+
+const group=new THREE.Group(); scene.add(group);
+const jointMeshes=[],boneLines=[];
+const jointGeo=new THREE.SphereGeometry(0.018,10,10);
+const poseMat=new THREE.MeshStandardMaterial({color:0xf2a541});
+const handMat=new THREE.MeshStandardMaterial({color:0x4fb286});
+for(let i=0;i<NUM_POINTS;i++){ const m=new THREE.Mesh(jointGeo,i<POSE_COUNT?poseMat:handMat); group.add(m); jointMeshes.push(m); }
+function addBones(conns,off,color){ conns.forEach(([a,b])=>{ const g=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]); const l=new THREE.Line(g,new THREE.LineBasicMaterial({color})); l.userData={a:a+off,b:b+off}; group.add(l); boneLines.push(l); }); }
+addBones(POSE_CONNECTIONS,0,0xf2a541);
+addBones(HAND_CONNECTIONS,POSE_COUNT,0x4fb286);
+addBones(HAND_CONNECTIONS,POSE_COUNT+HAND_COUNT,0x4fb286);
+
+function renderFrame(flat){
+  for(let i=0;i<NUM_POINTS;i++) jointMeshes[i].position.set(flat[i*3],-flat[i*3+1],flat[i*3+2]);
+  boneLines.forEach(l=>l.geometry.setFromPoints([jointMeshes[l.userData.a].position,jointMeshes[l.userData.b].position]));
+}
+function animate(){ requestAnimationFrame(animate); renderer.render(scene,camera); }
+animate();
+
+// ---- transitions: blend between end of one sign and start of next ----
+function lerpFrame(a,b,t){ const o=new Array(a.length); for(let i=0;i<a.length;i++) o[i]=a[i]+(b[i]-a[i])*t; return o; }
+function buildFullSequence(keys, blend=6){
+  const out=[];
+  keys.forEach((key,idx)=>{
+    const seq=dictionary[key];
+    seq.forEach(f=>out.push({frame:f,key}));
+    if(idx<keys.length-1){
+      const last=seq[seq.length-1];
+      const next=dictionary[keys[idx+1]][0];
+      for(let b=1;b<=blend;b++) out.push({frame:lerpFrame(last,next,b/(blend+1)),key:null});
+    }
+  });
+  return out;
+}
+
+let playSeq=null, pIdx=0, playing=false, lastTick=0;
+function tick(ts){
+  requestAnimationFrame(tick);
+  if(!playing||!playSeq)return;
+  if(ts-lastTick<66)return;
+  lastTick=ts;
+  const item=playSeq[pIdx];
+  renderFrame(item.frame);
+  highlightChip(item.key);
+  pIdx++;
+  if(pIdx>=playSeq.length){ playing=false; clearHighlight(); statusEl.textContent="Done."; }
+}
+requestAnimationFrame(tick);
+
+// ---- UI ----
+const fileInput=document.getElementById("fileInput");
+const dictStatus=document.getElementById("dictStatus");
+const micBtn=document.getElementById("micBtn");
+const goBtn=document.getElementById("goBtn");
+const textInput=document.getElementById("textInput");
+const statusEl=document.getElementById("status");
+const chipsEl=document.getElementById("chips");
+let chipEls={};
+
+fileInput.addEventListener("change",e=>{
+  const f=e.target.files[0]; if(!f)return;
+  const r=new FileReader();
+  r.onload=ev=>{ try{ dictionary=JSON.parse(ev.target.result); buildLookup();
+    dictStatus.textContent=`Loaded ${Object.keys(dictionary).length} signs.`;
+    micBtn.disabled=false; goBtn.disabled=false;
+  }catch(err){ dictStatus.textContent="Couldn't parse file."; } };
+  r.readAsText(f);
+});
+
+function process(text){
+  const tokens=text.toLowerCase().replace(/[^a-z'\s]/g,"").split(/\s+/).filter(Boolean);
+  chipsEl.innerHTML=""; chipEls={};
+  const matchedKeys=[];
+  tokens.forEach(tok=>{
+    const key=matchWord(tok);
+    const chip=document.createElement("span");
+    chip.className="chip "+(key?"matched":"unmatched");
+    chip.textContent=tok;
+    chipsEl.appendChild(chip);
+    if(key){ matchedKeys.push(key); chipEls[key]=chip; }
+  });
+  if(matchedKeys.length===0){ statusEl.textContent="No words matched the dictionary."; return; }
+  playSeq=buildFullSequence(matchedKeys);
+  pIdx=0; playing=true;
+  statusEl.textContent=`Signing ${matchedKeys.length} word(s)...`;
+}
+function highlightChip(key){ clearHighlight(); if(key&&chipEls[key]) chipEls[key].classList.add("playing"); }
+function clearHighlight(){ Object.values(chipEls).forEach(c=>c.classList.remove("playing")); }
+
+goBtn.addEventListener("click",()=>process(textInput.value));
+textInput.addEventListener("keydown",e=>{ if(e.key==="Enter") process(textInput.value); });
+
+// ---- speech recognition ----
+let recognition=null, recognizing=false;
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+if(SR){
+  recognition=new SR();
+  recognition.continuous=false; recognition.interimResults=true; recognition.lang="en-IN";
+  recognition.onstart=()=>{ recognizing=true; micBtn.classList.add("listening"); micBtn.textContent="⏹ Stop"; statusEl.textContent="Listening..."; };
+  recognition.onresult=ev=>{
+    let txt=""; for(let i=ev.resultIndex;i<ev.results.length;i++) txt+=ev.results[i][0].transcript;
+    textInput.value=txt;
+    if(ev.results[ev.results.length-1].isFinal) process(txt);
+  };
+  recognition.onerror=e=>statusEl.textContent="Speech error: "+e.error;
+  recognition.onend=()=>{ recognizing=false; micBtn.classList.remove("listening"); micBtn.textContent="🎤 Speak"; };
+}else{
+  micBtn.title="Speech recognition not supported — use Chrome. Typing still works.";
+}
+micBtn.addEventListener("click",()=>{ if(!recognition){ statusEl.textContent="Use Chrome for speech, or type instead."; return; } recognizing?recognition.stop():recognition.start(); });
+</script>
+</body>
+</html>

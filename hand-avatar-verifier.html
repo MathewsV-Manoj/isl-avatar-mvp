@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hand Skeleton Verifier — Week 1</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+  :root {
+    --bg: #0d1b1e;
+    --panel: #12262b;
+    --ink: #eaf2f0;
+    --muted: #8fa8a4;
+    --accent: #f2a541;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: 20px 16px 40px;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 1.3rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 0.88rem; margin-bottom: 16px; }
+
+  .panel {
+    background: var(--panel);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 14px;
+  }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  label { font-size: 0.8rem; color: var(--muted); }
+  select, input[type="file"] {
+    background: #1c3a38;
+    color: var(--ink);
+    border: none;
+    border-radius: 6px;
+    padding: 8px 10px;
+    font: inherit;
+  }
+  button {
+    font: inherit;
+    font-weight: 600;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 18px;
+    cursor: pointer;
+    background: var(--accent);
+    color: #1a1206;
+  }
+  button:active { transform: scale(0.97); }
+  #canvasHolder {
+    width: 100%;
+    height: 360px;
+    border-radius: 10px;
+    overflow: hidden;
+    background: #0a1618;
+    border: 1px solid #1c3a38;
+  }
+  .status { font-size: 0.8rem; color: var(--muted); margin-top: 8px; }
+  .note { font-size: 0.78rem; color: var(--muted); border-top: 1px solid #1c3a38; padding-top: 12px; margin-top: 18px; }
+  code { background: #1c3a38; padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Hand Skeleton Verifier</h1>
+  <div class="sub">Plays back a keypoint sequence as a 3D hand skeleton — for checking your model's output, not for the final product.</div>
+
+  <div class="panel">
+    <div class="row">
+      <div>
+        <label>Load your signal_dictionary.json</label><br>
+        <input type="file" id="fileInput" accept=".json">
+      </div>
+      <div>
+        <label>Word</label><br>
+        <select id="wordSelect"><option>demo (no file loaded)</option></select>
+      </div>
+      <div>
+        <label>Hand</label><br>
+        <select id="handSelect">
+          <option value="right">right</option>
+          <option value="left">left</option>
+        </select>
+      </div>
+    </div>
+    <div class="row" style="margin-top:10px;">
+      <button id="playBtn">▶ Play sequence</button>
+    </div>
+    <div class="status" id="status">No file loaded — showing a synthetic demo wave so you can see the renderer working.</div>
+  </div>
+
+  <div id="canvasHolder"></div>
+
+  <div class="note">
+    Your training script stores each frame as <code>[pose(33) , leftHand(21), rightHand(21)]</code> flattened to 225 numbers (x,y,z each).
+    This tool slices out just the 21×3 hand segment (indices 99–162 for left hand, 162–225 for right) and re-centers it on the wrist for display — the full-body normalization your model uses (shoulder-relative) isn't meant for a close-up hand view.
+  </div>
+</div>
+
+<script>
+// ---- MediaPipe hand landmark connections (standard 21-point skeleton) ----
+const HAND_CONNECTIONS = [
+  [0,1],[1,2],[2,3],[3,4],       // thumb
+  [0,5],[5,6],[6,7],[7,8],       // index
+  [5,9],[9,10],[10,11],[11,12],  // middle
+  [9,13],[13,14],[14,15],[15,16],// ring
+  [13,17],[17,18],[18,19],[19,20],// pinky
+  [0,17]                          // palm base
+];
+
+const POSE_COUNT = 33, HAND_COUNT = 21;
+const FRAME_LEN = (POSE_COUNT + 2 * HAND_COUNT) * 3; // 225
+
+let signalDictionary = null; // loaded from user's JSON
+let currentSequence = null;  // active [frames][21][3] array being played
+let playing = false;
+let frameIdx = 0;
+
+// ---- Three.js scene setup ----
+const holder = document.getElementById("canvasHolder");
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, holder.clientWidth / holder.clientHeight, 0.1, 100);
+camera.position.set(0, 0, 3);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setSize(holder.clientWidth, holder.clientHeight);
+holder.appendChild(renderer.domElement);
+
+const light = new THREE.PointLight(0xffffff, 1.2);
+light.position.set(2, 2, 3);
+scene.add(light);
+scene.add(new THREE.AmbientLight(0x556666, 0.6));
+
+// 21 joint spheres
+const jointMeshes = [];
+const jointGeo = new THREE.SphereGeometry(0.025, 12, 12);
+const jointMat = new THREE.MeshStandardMaterial({ color: 0xf2a541 });
+for (let i = 0; i < HAND_COUNT; i++) {
+  const m = new THREE.Mesh(jointGeo, jointMat);
+  scene.add(m);
+  jointMeshes.push(m);
+}
+
+// bone lines
+const boneLines = [];
+const boneMat = new THREE.LineBasicMaterial({ color: 0x4fb286 });
+HAND_CONNECTIONS.forEach(() => {
+  const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+  const line = new THREE.Line(geo, boneMat);
+  scene.add(line);
+  boneLines.push(line);
+});
+
+function renderHandFrame(points21x3) {
+  // points21x3: array of 21 [x,y,z]
+  points21x3.forEach((p, i) => {
+    jointMeshes[i].position.set(p[0], -p[1], p[2]); // flip y: image coords vs 3D up
+  });
+  HAND_CONNECTIONS.forEach(([a, b], i) => {
+    const pa = jointMeshes[a].position;
+    const pb = jointMeshes[b].position;
+    boneLines[i].geometry.setFromPoints([pa, pb]);
+  });
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  renderer.render(scene, camera);
+}
+animate();
+
+// ---- Slice a hand out of a full 225-length frame vector ----
+function extractHand(frameVec, side) {
+  const startIdx = (side === "left") ? POSE_COUNT * 3 : (POSE_COUNT + HAND_COUNT) * 3;
+  const raw = frameVec.slice(startIdx, startIdx + HAND_COUNT * 3);
+  const pts = [];
+  for (let i = 0; i < HAND_COUNT; i++) {
+    pts.push([raw[i * 3], raw[i * 3 + 1], raw[i * 3 + 2]]);
+  }
+  // re-center on wrist (point 0) and scale for a nice close-up view
+  const wrist = pts[0];
+  const scaled = pts.map(p => [
+    (p[0] - wrist[0]) * 4,
+    (p[1] - wrist[1]) * 4,
+    (p[2] - wrist[2]) * 4
+  ]);
+  return scaled;
+}
+
+// ---- Synthetic demo sequence (used until a real file is loaded) ----
+function buildDemoSequence(numFrames = 30) {
+  const seq = [];
+  for (let f = 0; f < numFrames; f++) {
+    const t = f / numFrames;
+    const pts = [];
+    for (let i = 0; i < HAND_COUNT; i++) {
+      const wiggle = Math.sin(t * Math.PI * 2 + i * 0.3) * 0.05;
+      pts.push([
+        (i % 5) * 0.08 - 0.16,
+        -Math.floor(i / 5) * 0.12 + wiggle,
+        Math.cos(t * Math.PI * 2) * 0.05
+      ]);
+    }
+    seq.push(pts);
+  }
+  return seq;
+}
+
+// ---- Playback ----
+function playSequence(seq) {
+  currentSequence = seq;
+  frameIdx = 0;
+  playing = true;
+}
+
+let lastTick = 0;
+function tick(timestamp) {
+  requestAnimationFrame(tick);
+  if (!playing || !currentSequence) return;
+  if (timestamp - lastTick < 66) return; // ~15fps playback
+  lastTick = timestamp;
+
+  renderHandFrame(currentSequence[frameIdx]);
+  frameIdx++;
+  if (frameIdx >= currentSequence.length) {
+    frameIdx = 0; // loop
+  }
+}
+requestAnimationFrame(tick);
+
+// ---- UI wiring ----
+const fileInput = document.getElementById("fileInput");
+const wordSelect = document.getElementById("wordSelect");
+const handSelect = document.getElementById("handSelect");
+const playBtn = document.getElementById("playBtn");
+const statusEl = document.getElementById("status");
+
+fileInput.addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (evt) => {
+    try {
+      signalDictionary = JSON.parse(evt.target.result);
+      const words = Object.keys(signalDictionary);
+      wordSelect.innerHTML = words.map(w => `<option value="${w}">${w}</option>`).join("");
+      statusEl.textContent = `Loaded ${words.length} words from your signal dictionary.`;
+    } catch (err) {
+      statusEl.textContent = "Couldn't parse that file — check it's the JSON from your training script.";
+    }
+  };
+  reader.readAsText(file);
+});
+
+playBtn.addEventListener("click", () => {
+  const side = handSelect.value;
+  if (signalDictionary) {
+    const word = wordSelect.value;
+    const frames = signalDictionary[word]; // [frames][225]
+    const seq = frames.map(frameVec => extractHand(frameVec, side));
+    playSequence(seq);
+    statusEl.textContent = `Playing "${word}" (${side} hand).`;
+  } else {
+    playSequence(buildDemoSequence());
+    statusEl.textContent = "Playing synthetic demo (load your JSON for real data).";
+  }
+});
+</script>
+</body>
+</html>

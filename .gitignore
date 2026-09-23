@@ -1,0 +1,47 @@
+# Python environments and caches
+isl_env/
+.venv/
+__pycache__/
+.cache/
+*.py[cod]
+
+# Downloaded corpora, training artefacts, and model checkpoints
+datasets/
+dataset_sources/
+models/
+signal_dictionary_bridgeconn/
+signal_dictionary_cislr/
+signal_dictionary_include/
+signal_dictionary_isign/
+signal_dictionary_isl500/
+signal_dictionary_islrtc_batch/
+signal_dictionary_islrtc_batch_v3/
+signal_dictionary_islrtc_sentences/
+signal_dictionary_kaggle_social/
+signal_dictionary_official/
+
+# Generated run output and local deployment leftovers
+logs/
+reports/
+netlify-demo/
+*.log
+*.lock
+*.zip
+*.tmp
+*.bak
+
+# Large derived manifests are reproducible from the source scripts.
+*.json
+!dataset_inventory.json
+!runtime_index.json
+!runtime_bootstrap.json
+!runtime_quickstart.json
+!signal_dictionary.json
+!signal_dictionary_demo.json
+!vercel.json
+!deployment/**/*.json
+
+# Unrelated CST antenna files accidentally kept in this workspace
+blade_monopole_cst.vba
+BLADE_MONOPOLE_README.md
+rf_blade_combined.bas

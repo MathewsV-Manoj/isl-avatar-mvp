@@ -1,0 +1,173 @@
+{
+  "local": [
+    {
+      "path": "datasets\\isltranslate\\ISLTranslate.csv",
+      "exists": true,
+      "bytes": 1642541,
+      "rows": 31222
+    },
+    {
+      "path": "datasets\\isltranslate\\ISL-signer_validation.csv",
+      "exists": true,
+      "bytes": 25632,
+      "rows": 291
+    },
+    {
+      "path": "datasets\\isign_sentence_metadata\\normalized.jsonl",
+      "exists": true,
+      "bytes": 26241799
+    },
+    {
+      "path": "datasets\\posestitch_isl\\BPCC-ISL.csv",
+      "exists": true,
+      "bytes": 1199856263,
+      "rows": "deferred_large_file_scan"
+    },
+    {
+      "path": "datasets\\posestitch_isl\\BLIMP-ISL.csv",
+      "exists": true,
+      "bytes": 15447454104,
+      "rows": "deferred_large_file_scan"
+    },
+    {
+      "path": "datasets\\cislr\\prototype.csv",
+      "exists": true,
+      "bytes": 176545,
+      "rows": 4765
+    }
+  ],
+  "pose_arrays": [],
+  "blockers": [],
+  "include_avatar_dictionary": {
+    "path": "signal_dictionary_include\\manifest.json",
+    "license": "CC-BY-4.0",
+    "labels": 247,
+    "shards": 3,
+    "source": "AI4Bharat INCLUDE",
+    "feature_shape": [
+      30,
+      225
+    ]
+  },
+  "islrtc_validated_batch": {
+    "path": "signal_dictionary_islrtc_batch\\manifest.json",
+    "license": "MIT per source dataset card; verify upstream data.gov.in terms before product use",
+    "labels": 30,
+    "shards": 1,
+    "source": "ISLRTC official-derived validated sample batch",
+    "feature_shape": [
+      30,
+      225
+    ]
+  },
+  "islrtc_validated_batch_2": {
+    "path": "signal_dictionary_islrtc_batch_v3\\manifest.json",
+    "license": "MIT per source dataset card; verify upstream data.gov.in terms before product use",
+    "labels": 30,
+    "shards": 1,
+    "source": "ISLRTC official-derived validated batch 2",
+    "feature_shape": [
+      30,
+      225
+    ]
+  },
+  "kaggle_social_validated_batch": {
+    "path": "signal_dictionary_kaggle_social\\manifest.json",
+    "license": "CC BY 4.0",
+    "labels": 48,
+    "shards": 1,
+    "source": "Kaggle ISL social interaction animation dataset",
+    "feature_shape": [
+      30,
+      225
+    ]
+  },
+  "isolated_variation_corpus": {
+    "source": "vidit031/isl-isolated-40words",
+    "license": "research; respect upstream licenses",
+    "path": "datasets\\isl_isolated_40words_filtered.json",
+    "clips": 641,
+    "labels": 40,
+    "rejected_clips": 1,
+    "feature_shape": [
+      30,
+      225
+    ]
+  },
+  "sentence_motion_candidate": {
+    "path": "signal_dictionary_islrtc_sentences\\manifest.json",
+    "source": "ISL-CSLTR sentence videos",
+    "license": "CC BY-SA 4.0",
+    "sentences": 101,
+    "feature_shape": [
+      30,
+      225
+    ],
+    "promoted": true
+  },
+  "isl500_variation_candidate": {
+    "path": "signal_dictionary_isl500\\manifest.json",
+    "source": "ISL500/ISL-DATA landmark variation corpus",
+    "license": "research/academic only; commercial use requires author permission",
+    "labels": 474,
+    "excluded_overlap": 26,
+    "feature_shape": [
+      30,
+      225
+    ],
+    "promoted": true
+  },
+  "isign_word_dictionary": {
+    "path": "signal_dictionary_isign\\manifest.json",
+    "source": "Exploration-Lab/iSign pose-format corpus",
+    "license": "cc-by-nc-sa-4.0; research use; commercial use requires permission",
+    "labels": 1398,
+    "excluded_overlap": 18,
+    "feature_shape": [
+      30,
+      225
+    ],
+    "pose_archive_valid": true,
+    "pose_archive_entries": 127238,
+    "promoted": true
+  },
+  "isign_sentence_context": {
+    "source": "Exploration-Lab/iSign",
+    "index": "datasets\\isign\\isign_weak_index.jsonl",
+    "rows": 126129,
+    "native_gloss_supervision": false,
+    "continuous_pose_supervision": true
+  },
+  "isolated_classifier_candidate": {
+    "path": "models\\isl_isolated_40words_conv_report.json",
+    "architecture": "conv_temporal",
+    "best_valid_accuracy": 0.296875,
+    "train_clips": 513,
+    "valid_clips": 128,
+    "promoted": false
+  },
+  "sentence_model": {
+    "path": "models\\bpcc_gloss_tagger_report.json",
+    "rows": 834652,
+    "best_valid_token_accuracy": 0.9999756864524914,
+    "input_vocab": 4411,
+    "output_vocab": 3314,
+    "weak_supervision": true,
+    "continuous_pose_supervision": false,
+    "promoted": true
+  },
+  "sentence_context": {
+    "source": "Exploration-Lab/ISLTranslate",
+    "license": "CC-BY-NC",
+    "input_rows": 31224,
+    "kept_rows": 1340,
+    "known_input_tokens": 893,
+    "native_gloss_supervision": false,
+    "continuous_pose_supervision": false,
+    "index": "datasets\\isltranslate\\weak_index.jsonl",
+    "sparse_index": "datasets\\isltranslate\\weak_index_sparse.jsonl",
+    "sparse_kept_rows": 11889
+  },
+  "cislr_archive_entries": 7052,
+  "cislr_archive_test": "deferred_full_crc_check"
+}
