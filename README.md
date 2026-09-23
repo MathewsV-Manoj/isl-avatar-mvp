@@ -230,7 +230,6 @@ Built by **Team Odyssey**.
 | --- |
 | Mathews V Manoj |
 | Meria Rachel Binu |
-| Rohan |
 | Rohan Fleny |
 | Jotham Koshy Philip |
 
