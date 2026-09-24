@@ -226,11 +226,9 @@ Independent evaluation by ISL signers is required before representing the produc
 
 Built by **Team Odyssey**.
 
-| Team member |
-| --- |
-| Mathews V Manoj |
-| Meria Rachel Binu |
-| Rohan Fleny |
-| Jotham Koshy Philip |
+| Team member | Team member |
+| --- | --- |
+| <img src="docs/team/rohan-fleny.jpeg" alt="Rohan Fleny" width="140"><br><strong>Rohan Fleny</strong> | <img src="docs/team/mathews-v-manoj.jpeg" alt="Mathews V Manoj" width="140"><br><strong>Mathews V Manoj</strong> |
+| <img src="docs/team/meria-rachel-binu.jpeg" alt="Meria Rachel Binu" width="140"><br><strong>Meria Rachel Binu</strong> | <img src="docs/team/jotham-koshy-philip.jpeg" alt="Jotham Koshy Philip" width="140"><br><strong>Jotham Koshy Philip</strong> |
 
 For source, setup, and deployment details, start with this README and the files in [`deployment/`](deployment/).
